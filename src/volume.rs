@@ -1,5 +1,5 @@
 use bytemuck::Zeroable;
-use cgmath::{BaseNum, ElementWise, EuclideanSpace, MetricSpace, Point3, Vector3};
+use cgmath::{BaseNum,  EuclideanSpace, MetricSpace, Point3, Vector3};
 use npyz::npz::{self};
 use num_traits::Float;
 use std::{
@@ -11,9 +11,10 @@ use wgpu::util::{DeviceExt, TextureDataOrder};
 pub struct Volume {
     pub timesteps: u32,
     pub resolution: Vector3<u32>,
-    volumes: Vec<wgpu::Texture>,
     bind_groups: Vec<wgpu::BindGroup>,
     pub(crate) aabb: Aabb<f32>,
+    pub min_value: f32,
+    pub max_value: f32,
 }
 
 impl Volume {
@@ -33,7 +34,20 @@ impl Volume {
             array.shape()[3] as u32,
             array.shape()[4] as u32,
         ];
-        let data: Vec<f32> = array.into_vec()?;
+        let mut data: Vec<f32> = array.into_vec()?;
+        let mut max_value = data
+            .iter()
+            .max_by(|a,b| a.total_cmp(b)).unwrap().clone();
+        let min_value = data
+        .iter()
+        .min_by(|a,b| a.total_cmp(b)).unwrap().clone();
+
+        if min_value == max_value {
+            max_value = min_value + 1.0;
+        }
+
+        data = data.iter().map(|x| (x - min_value) / (max_value - min_value)).collect(); 
+
         let volumes: Vec<wgpu::Texture> = (0..timesteps)
             .map(|i| {
                 device.create_texture_with_data(
@@ -93,14 +107,15 @@ impl Volume {
         Ok(Self {
             timesteps,
             resolution: resolution.into(),
-            volumes,
             bind_groups,
             aabb: Aabb::unit(),
+            max_value,
+            min_value,
         })
     }
 
-    pub(crate) fn bind_group(&self, i: usize) -> &wgpu::BindGroup {
-        &self.bind_groups[i]
+    pub(crate) fn bind_group(&self, i: usize) -> Option<&wgpu::BindGroup> {
+        self.bind_groups.get(i)
     }
 
     pub(crate) fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -140,9 +155,7 @@ pub struct Aabb<F: Float + BaseNum> {
 }
 
 impl<F: Float + BaseNum> Aabb<F> {
-    pub fn new(min: Point3<F>, max: Point3<F>) -> Self {
-        Self { min, max }
-    }
+
 
     pub fn grow(&mut self, pos: &Point3<F>) {
         self.min.x = self.min.x.min(pos.x);
@@ -152,20 +165,6 @@ impl<F: Float + BaseNum> Aabb<F> {
         self.max.x = self.max.x.max(pos.x);
         self.max.y = self.max.y.max(pos.y);
         self.max.z = self.max.z.max(pos.z);
-    }
-
-    pub fn corners(&self) -> [Point3<F>; 8] {
-        [
-            Vector3::new(F::zero(), F::zero(), F::zero()),
-            Vector3::new(F::one(), F::zero(), F::zero()),
-            Vector3::new(F::zero(), F::one(), F::zero()),
-            Vector3::new(F::one(), F::one(), F::zero()),
-            Vector3::new(F::zero(), F::zero(), F::one()),
-            Vector3::new(F::one(), F::zero(), F::one()),
-            Vector3::new(F::zero(), F::one(), F::one()),
-            Vector3::new(F::one(), F::one(), F::one()),
-        ]
-        .map(|d| self.min + self.max.to_vec().mul_element_wise(d))
     }
 
     pub fn unit() -> Self {

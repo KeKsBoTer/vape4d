@@ -1,26 +1,21 @@
 use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
-    io::{BufReader, Read, Seek},
-    path::{Path, PathBuf},
-    sync::Arc,
+    collections::HashMap, fs, io::{BufReader, Read, Seek}, sync::Arc
 };
 
-use camera::PerspectiveCamera;
+use camera::{GenericCamera, PerspectiveCamera};
 use controller::CameraController;
 #[cfg(target_arch = "wasm32")]
 use instant::{Duration, Instant};
 use renderer::{RenderSettings, VolumeRenderer};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
-use wgpu::{util::DeviceExt, Backends, Extent3d};
+use wgpu::Backends;
 
 use cgmath::{
-    Deg, EuclideanSpace, Euler, Perspective, Point3, Quaternion, Rad, UlpsEq, Vector2, Vector3,
-    Zero,
+    vec3, Deg, EuclideanSpace, InnerSpace, Point3, Quaternion, Rotation, Vector2,
+    Vector3,
 };
-use egui::Color32;
-use num_traits::One;
+use egui::{Color32, TextureId};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;
@@ -28,13 +23,18 @@ use winit::{
     dpi::PhysicalSize,
     event::{DeviceEvent, ElementState, Event, WindowEvent},
     event_loop::EventLoop,
-    keyboard::{KeyCode, PhysicalKey},
+    keyboard::PhysicalKey,
     window::{Window, WindowBuilder},
 };
 
-use crate::{camera::PerspectiveProjection, volume::{Aabb, Volume}};
+use crate::{
+    camera::PerspectiveProjection,
+    cmap::ColorMap,
+    volume::{Aabb, Volume},
+};
 
 mod camera;
+mod cmap;
 mod controller;
 mod debug;
 mod lines;
@@ -75,7 +75,10 @@ impl WGPUContext {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     required_features,
-                    required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                    required_limits: wgpu::Limits {
+                        max_bind_groups: 5,
+                        ..wgpu::Limits::downlevel_webgl2_defaults()
+                    },
                     label: None,
                 },
                 None,
@@ -99,7 +102,7 @@ pub struct WindowContext {
     scale_factor: f32,
 
     controller: CameraController,
-    camera: PerspectiveCamera,
+    camera: GenericCamera<PerspectiveProjection>,
     ui_renderer: ui_renderer::EguiWGPU,
     ui_visible: bool,
 
@@ -111,7 +114,12 @@ pub struct WindowContext {
     volume: Volume,
     renderer: VolumeRenderer,
 
-    render_settings:RenderSettings,
+    render_settings: RenderSettings,
+    cmaps: HashMap<String,(cmap::ColorMap,TextureId)>,
+    selected_cmap: String,
+
+    playing:bool,
+    animation_duration:Duration,
 }
 
 impl WindowContext {
@@ -167,18 +175,7 @@ impl WindowContext {
         };
         surface.configure(&device, &config);
 
-        let controller = CameraController::new(0.1, 0.05);
-        let camera = PerspectiveCamera::new(
-            Point3::new(0., 0., -4.),
-            Quaternion::one(),
-            PerspectiveProjection::new(
-                Vector2::new(size.width, size.height),
-                Deg(45.),
-                0.01,
-                1000.,
-            ),
-        );
-        let ui_renderer = ui_renderer::EguiWGPU::new(device, surface_format, &window);
+        let mut ui_renderer = ui_renderer::EguiWGPU::new(device, surface_format, &window);
 
         let mut buff_reader = BufReader::new(pc_file);
         let volume = Volume::load_npz(device, queue, &mut buff_reader)?;
@@ -187,8 +184,63 @@ impl WindowContext {
         let line_renderer = lines::LineRenderer::new(device, render_format);
         let debug_lines = debug::DebugLines::new(&volume);
 
-        let render_settings = 
-        RenderSettings{ clipping_aabb: Aabb::unit(), use_dda: false, time: 0., step_size: volume.resolution.x as f32 / 2000.};
+        let files = find_files_with_extension_in_folder("colormaps", ".npy");
+        let cmaps: HashMap<String,(ColorMap,TextureId)> = files
+            .iter()
+            .map(|f| {
+                let mut reader =
+                    BufReader::new(fs::File::open(format!("colormaps/{}", f)).unwrap());
+                let name = f.split(".").next().unwrap().to_string();
+                let cmap = ColorMap::from_npz(device, queue, &mut reader).unwrap();
+                let egui_texture:TextureId = ui_renderer.renderer.register_native_texture(
+                    &device,
+                    &cmap.texture.create_view(&Default::default()),
+                    wgpu::FilterMode::Linear,
+                );
+                (name.clone(),(cmap, egui_texture))
+            })
+            .collect();
+
+        
+
+        let render_settings = RenderSettings {
+            clipping_aabb: Aabb::unit(),
+            use_dda: false,
+            time: 0.,
+            step_size: 2. / 1000.,
+            spatial_filter: wgpu::FilterMode::Linear,
+            temporal_filter: wgpu::FilterMode::Linear,
+            distance_scale: 1.,
+        };
+
+        let mut controller = CameraController::new(0.1, 0.05);
+        controller.center = volume.aabb.center();
+        let r = volume.aabb.radius();
+        let corner = vec3(1., -1., 1.);
+        let view_dir = Quaternion::look_at(-corner, Vector3::unit_y());
+        let camera = PerspectiveCamera::new(
+            Point3::from_vec(corner.normalize()) * r * 3.,
+            view_dir,
+            PerspectiveProjection::new(
+                Vector2::new(size.width, size.height),
+                Deg(45.),
+                0.01,
+                1000.,
+            ),
+        );
+
+        // let camera = GenericCamera::new(
+        //     volume.aabb.center()-vec3(0., 0., 3.),
+        //     Quaternion::one(),
+        //     OrthographicProjection::new(
+        //         Vector2::new(size.width, size.height)/300,
+        //         1000.,
+        //         -1000.,
+        //     ),
+        // );
+        let selected_cmap = "magma".to_string();
+
+        let animation_duration =Duration::from_secs_f32(volume.timesteps as f32*0.05);
 
         Ok(Self {
             wgpu_context,
@@ -206,7 +258,11 @@ impl WindowContext {
             renderer,
             line_renderer,
             debug_lines,
-            render_settings
+            render_settings,
+            cmaps,
+            selected_cmap,
+            animation_duration,
+            playing: true,
         })
     }
 
@@ -214,7 +270,9 @@ impl WindowContext {
         if new_size.width > 0 && new_size.height > 0 {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
-            self.camera.projection.resize(new_size.width, new_size.height);
+            self.camera
+                .projection
+                .resize(new_size.width, new_size.height);
             self.surface
                 .configure(&self.wgpu_context.device, &self.config);
         }
@@ -227,6 +285,11 @@ impl WindowContext {
 
     fn update(&mut self, dt: Duration) {
         self.controller.update_camera(&mut self.camera, dt);
+        
+        if self.playing {
+            self.render_settings.time += dt.as_secs_f32() / self.animation_duration.as_secs_f32();
+            self.render_settings.time = self.render_settings.time.fract();
+        }
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -249,13 +312,14 @@ impl WindowContext {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("render command encoder"),
                 });
+
         self.renderer.prepare(
             &mut encoder,
             &self.wgpu_context.device,
             &self.wgpu_context.queue,
             &self.volume,
             self.camera.clone(),
-            self.render_settings
+            &self.render_settings,
         );
 
         self.line_renderer.prepare(
@@ -283,7 +347,7 @@ impl WindowContext {
                 ..Default::default()
             });
             self.renderer
-                .render(&mut render_pass, &self.volume);
+                .render(&mut render_pass, &self.volume, &self.cmaps[&self.selected_cmap].0);
             self.line_renderer
                 .render(&mut render_pass, &self.renderer.camera);
         }
@@ -315,6 +379,22 @@ impl WindowContext {
         output.present();
         Ok(())
     }
+}
+
+fn find_files_with_extension_in_folder(folder_path: &str, extension: &str) -> Vec<String> {
+    let mut files = Vec::new();
+    if let Ok(entries) = fs::read_dir(folder_path) {
+        for entry in entries {
+            if let Ok(entry) = entry {
+                if let Some(file_name) = entry.file_name().to_str() {
+                    if file_name.ends_with(extension) {
+                        files.push(file_name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    files
 }
 
 pub fn smoothstep(x: f32) -> f32 {

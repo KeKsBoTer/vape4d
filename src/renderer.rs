@@ -1,5 +1,6 @@
 use crate::{
-    camera::{Camera, PerspectiveCamera, VIEWPORT_Y_FLIP},
+    camera::{GenericCamera, Projection, VIEWPORT_Y_FLIP},
+    cmap::ColorMap,
     uniform::UniformBuffer,
     volume::{Aabb, Volume},
 };
@@ -26,6 +27,7 @@ impl VolumeRenderer {
                 &UniformBuffer::<CameraUniform>::bind_group_layout(device),
                 &UniformBuffer::<RenderSettingsUniform>::bind_group_layout(device),
                 &Self::bind_group_layout(device),
+                &ColorMap::bind_group_layout(device),
             ],
             push_constant_ranges: &[],
         });
@@ -45,7 +47,7 @@ impl VolumeRenderer {
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: color_format,
-                    blend: None,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -104,14 +106,14 @@ impl VolumeRenderer {
         }
     }
 
-    pub fn prepare(
+    pub fn prepare<P: Projection>(
         &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        device: &wgpu::Device,
+        _encoder: &mut wgpu::CommandEncoder,
+        _device: &wgpu::Device,
         queue: &wgpu::Queue,
         volume: &Volume,
-        camera: PerspectiveCamera,
-        render_settings: RenderSettings,
+        camera: GenericCamera<P>,
+        render_settings: &RenderSettings,
     ) {
         let uniform = self.camera.as_mut();
         uniform.set_camera(camera);
@@ -128,11 +130,13 @@ impl VolumeRenderer {
         &'rpass self,
         render_pass: &mut wgpu::RenderPass<'rpass>,
         volume: &'rpass Volume,
+        cmap: &'rpass ColorMap,
     ) {
-        render_pass.set_bind_group(0, volume.bind_group(self.step as usize), &[]);
+        render_pass.set_bind_group(0, volume.bind_group(self.step as usize).unwrap(), &[]);
         render_pass.set_bind_group(1, self.camera.bind_group(), &[]);
         render_pass.set_bind_group(2, self.settings.bind_group(), &[]);
         render_pass.set_bind_group(3, &self.bind_group, &[]);
+        render_pass.set_bind_group(4, &cmap.bindgroup, &[]);
         render_pass.set_pipeline(&self.pipeline);
 
         render_pass.draw_indirect(&self.draw_indirect, 0);
@@ -188,18 +192,21 @@ impl CameraUniform {
         self.proj_inv_matrix = proj_matrix.invert().unwrap();
     }
 
-    pub fn set_camera(&mut self, camera: impl Camera) {
+    pub fn set_camera<P: Projection>(&mut self, camera: GenericCamera<P>) {
         self.set_proj_mat(camera.proj_matrix());
         self.set_view_mat(camera.view_matrix());
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct RenderSettings {
     pub clipping_aabb: Aabb<f32>,
     pub use_dda: bool,
     pub time: f32,
     pub step_size: f32,
+    pub spatial_filter: wgpu::FilterMode,
+    pub temporal_filter: wgpu::FilterMode,
+    pub distance_scale:f32
 }
 
 #[repr(C)]
@@ -213,6 +220,9 @@ pub struct RenderSettingsUniform {
     time_steps: u32,
     step_size: f32,
     use_dda: u32,
+    temporal_filter: u32,
+    distance_scale:f32,
+    _pad: [u32; 2],
 }
 
 impl RenderSettingsUniform {
@@ -228,6 +238,9 @@ impl RenderSettingsUniform {
             clipping_max: settings.clipping_aabb.max.to_vec().extend(0.),
             step_size: settings.step_size,
             use_dda: settings.use_dda as u32,
+            temporal_filter: settings.temporal_filter as u32,
+            distance_scale: settings.distance_scale,
+            _pad: [0; 2],
         }
     }
 }
@@ -243,6 +256,9 @@ impl Default for RenderSettingsUniform {
             time_steps: 1,
             step_size: 0.01,
             use_dda: 0,
+            temporal_filter: wgpu::FilterMode::Nearest as u32,
+            distance_scale:1.,
+            _pad: [0; 2],
         }
     }
 }

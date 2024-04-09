@@ -1,3 +1,4 @@
 /target
-*.npz
+**/*.npz
+**/*.npy
 .vscode/

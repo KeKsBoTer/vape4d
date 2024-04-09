@@ -1,15 +1,11 @@
 use std::collections::HashMap;
 
 use bytemuck::Zeroable;
-use cgmath::{
-    BaseNum, EuclideanSpace, Matrix, Matrix4, Point3, Quaternion, SquareMatrix, Transform, Vector3,
-    Vector4,
-};
-use num_traits::Float;
+use cgmath::{EuclideanSpace, Matrix4, Point3, SquareMatrix, Transform, Vector4};
+
 use wgpu::Color;
 
 use crate::{
-    camera,
     lines::Line,
     volume::{Aabb, Volume},
 };
@@ -97,10 +93,6 @@ impl DebugLines {
         self.aabb = aabb;
     }
 
-    pub fn any_visible(&self) -> bool {
-        self.line_groups.values().any(|lg| lg.visible)
-    }
-
     pub fn update_clipping_box(&mut self, clipping_box: &Aabb<f32>) {
         let t = Matrix4::from_translation(clipping_box.center().to_vec())
             * Matrix4::from_diagonal((clipping_box.size() * 0.5).extend(1.));
@@ -137,10 +129,6 @@ impl DebugLines {
                 .insert(name.to_string(), LineGroup::new(lines, false));
             self.update_aabb();
         }
-    }
-
-    pub fn bbox(&self) -> &Aabb<f32> {
-        &self.aabb
     }
 }
 
@@ -181,20 +169,4 @@ fn axes_lines(t: Matrix4<f32>) -> [Line; 3] {
         Line::new(c, y, Color::GREEN),
         Line::new(c, z, Color::BLUE),
     ]
-}
-
-fn blend(a: wgpu::Color, b: wgpu::Color, t: f64) -> wgpu::Color {
-    wgpu::Color {
-        r: a.r * (1. - t) + b.r * t,
-        g: a.g * (1. - t) + b.g * t,
-        b: a.b * (1. - t) + b.b * t,
-        a: a.a * (1. - t) + b.a * t,
-    }
-}
-
-fn three_plane_intersection(a: Vector4<f32>, b: Vector4<f32>, c: Vector4<f32>) -> Point3<f32> {
-    let m = Matrix4::from_cols(a, b, c, Vector4::new(0., 0., 0., 1.)).transpose();
-
-    let intersection = m.inverse_transform().unwrap() * Vector4::new(0., 0., 0., 1.);
-    return Point3::from_homogeneous(intersection);
 }
