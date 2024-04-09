@@ -1,0 +1,40 @@
+[package]
+name = "v4dv"
+version = "0.1.0"
+edition = "2021"
+authors = ["Simon Niedermayr"]
+description = "4D Volume Viewer"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+wgpu = { version = "0.19.1" }
+winit = "0.29.10"
+cgmath = { version = "0.18.0", features = [
+    "bytemuck",
+], git = 'https://github.com/rustgd/cgmath' }
+env_logger = "0.11"
+clap = { version = "4.4.6", features = ["derive"] }
+bytemuck = { version = "1.13.0", features = ["derive"] }
+anyhow = "1.0.70"
+byteorder = "1.4.3"
+num-traits = "0.2.16"
+half = { version = "2.3.1", features = ["bytemuck", "num-traits"] }
+log = "0.4.20"
+
+
+egui = "0.27.2"
+egui-wgpu = "0.27.2"
+egui-winit = { version = "0.27.2", features = [], default-features = false }
+
+npyz = { version = "0.8.3", features = ["npz", "half"] }
+futures-intrusive = "0.5.0"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster = { version = "0.3.0", features = ["macro"] }
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "viewer"
