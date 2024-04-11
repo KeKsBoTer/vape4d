@@ -13,9 +13,10 @@ pub struct VolumeRenderer {
     pipeline: wgpu::RenderPipeline,
     pub(crate) camera: UniformBuffer<CameraUniform>,
     settings: UniformBuffer<RenderSettingsUniform>,
-    draw_indirect: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
-    step: u32,
+    // filter_bg_nearest: wgpu::BindGroup,
+    // filter_bg_linear: wgpu::BindGroup,
+    bind_group: Option<wgpu::BindGroup>,
+    filter_mode: wgpu::FilterMode,
 }
 
 impl VolumeRenderer {
@@ -23,10 +24,9 @@ impl VolumeRenderer {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("render pipeline layout"),
             bind_group_layouts: &[
-                &Volume::bind_group_layout(device),
+                &Self::bind_group_layout(device),
                 &UniformBuffer::<CameraUniform>::bind_group_layout(device),
                 &UniformBuffer::<RenderSettingsUniform>::bind_group_layout(device),
-                &Self::bind_group_layout(device),
                 &ColorMap::bind_group_layout(device),
             ],
             push_constant_ranges: &[],
@@ -65,33 +65,37 @@ impl VolumeRenderer {
             multiview: None,
         });
 
-        let draw_indirect = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("indirect draw buffer"),
-            usage: wgpu::BufferUsages::INDIRECT,
-            contents: wgpu::util::DrawIndirectArgs {
-                vertex_count: 4,
-                instance_count: 1,
-                first_vertex: 0,
-                first_instance: 0,
-            }
-            .as_bytes(),
-        });
+        // let filter_bg_linear = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        //     label: Some("volume renderer bind group"),
+        //     layout: &Self::bind_group_layout(device),
+        //     entries: &[wgpu::BindGroupEntry {
+        //         binding: 0,
+        //         resource: wgpu::BindingResource::Sampler(&device.create_sampler(
+        //             &wgpu::SamplerDescriptor {
+        //                 label: Some("volume sampler"),
+        //                 mag_filter: wgpu::FilterMode::Linear,
+        //                 min_filter: wgpu::FilterMode::Linear,
+        //                 ..Default::default()
+        //             },
+        //         )),
+        //     }],
+        // });
 
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("volume sampler"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("volume renderer bind group"),
-            layout: &Self::bind_group_layout(device),
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Sampler(&sampler),
-            }],
-        });
+        // let filter_bg_nearest = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        //     label: Some("volume renderer bind group"),
+        //     layout: &Self::bind_group_layout(device),
+        //     entries: &[wgpu::BindGroupEntry {
+        //         binding: 0,
+        //         resource: wgpu::BindingResource::Sampler(&device.create_sampler(
+        //             &wgpu::SamplerDescriptor {
+        //                 label: Some("volume sampler"),
+        //                 mag_filter: wgpu::FilterMode::Nearest,
+        //                 min_filter: wgpu::FilterMode::Nearest,
+        //                 ..Default::default()
+        //             },
+        //         )),
+        //     }],
+        // });
 
         let camera = UniformBuffer::new_default(device, Some("camera uniform buffer"));
         let settings = UniformBuffer::new_default(device, Some("render settings uniform buffer"));
@@ -99,17 +103,18 @@ impl VolumeRenderer {
         VolumeRenderer {
             pipeline,
             camera,
-            draw_indirect,
-            bind_group,
+            // filter_bg_nearest,
+            // filter_bg_linear,
+            bind_group: None,
+            filter_mode: wgpu::FilterMode::Linear,
             settings,
-            step: 0,
         }
     }
 
     pub fn prepare<P: Projection>(
         &mut self,
         _encoder: &mut wgpu::CommandEncoder,
-        _device: &wgpu::Device,
+        device: &wgpu::Device,
         queue: &wgpu::Queue,
         volume: &Volume,
         camera: GenericCamera<P>,
@@ -123,34 +128,91 @@ impl VolumeRenderer {
 
         *settings = RenderSettingsUniform::from_settings(&render_settings, volume);
         self.settings.sync(queue);
-        self.step = ((volume.timesteps - 1) as f32 * render_settings.time) as u32;
+        let step = ((volume.timesteps - 1) as f32 * render_settings.time) as usize;
+
+        self.filter_mode = render_settings.spatial_filter;
+
+        self.bind_group = Some(
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("volume renderer bind group"),
+                layout: &Self::bind_group_layout(device),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(
+                            &volume.textures[step]
+                                .create_view(&wgpu::TextureViewDescriptor::default()),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(
+                            &volume.textures[(step + 1) % volume.timesteps as usize]
+                                .create_view(&wgpu::TextureViewDescriptor::default()),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(&device.create_sampler(
+                            &wgpu::SamplerDescriptor {
+                                label: Some("volume sampler"),
+                                mag_filter: render_settings.spatial_filter,
+                                min_filter: render_settings.spatial_filter,
+                                ..Default::default()
+                            },
+                        )),
+                    },
+                ],
+            }),
+        );
     }
 
     pub fn render<'rpass>(
         &'rpass self,
         render_pass: &mut wgpu::RenderPass<'rpass>,
-        volume: &'rpass Volume,
         cmap: &'rpass ColorMap,
     ) {
-        render_pass.set_bind_group(0, volume.bind_group(self.step as usize).unwrap(), &[]);
+        render_pass.set_bind_group(0, self.bind_group.as_ref().unwrap(), &[]);
         render_pass.set_bind_group(1, self.camera.bind_group(), &[]);
         render_pass.set_bind_group(2, self.settings.bind_group(), &[]);
-        render_pass.set_bind_group(3, &self.bind_group, &[]);
-        render_pass.set_bind_group(4, &cmap.bindgroup, &[]);
+        render_pass.set_bind_group(3, &cmap.bindgroup, &[]);
         render_pass.set_pipeline(&self.pipeline);
 
-        render_pass.draw_indirect(&self.draw_indirect, 0);
+        // render_pass.draw_indirect(&self.draw_indirect, 0);
+        render_pass.draw(0..4, 0..1);
     }
 
     fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("volume renderer bind group layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            }],
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D3,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D3,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
         })
     }
 }
@@ -201,12 +263,11 @@ impl CameraUniform {
 #[derive(Debug, Clone)]
 pub struct RenderSettings {
     pub clipping_aabb: Aabb<f32>,
-    pub use_dda: bool,
     pub time: f32,
     pub step_size: f32,
     pub spatial_filter: wgpu::FilterMode,
     pub temporal_filter: wgpu::FilterMode,
-    pub distance_scale:f32
+    pub distance_scale: f32,
 }
 
 #[repr(C)]
@@ -219,10 +280,9 @@ pub struct RenderSettingsUniform {
     time: f32,
     time_steps: u32,
     step_size: f32,
-    use_dda: u32,
     temporal_filter: u32,
-    distance_scale:f32,
-    _pad: [u32; 2],
+    distance_scale: f32,
+    _pad: [u32; 3],
 }
 
 impl RenderSettingsUniform {
@@ -237,10 +297,9 @@ impl RenderSettingsUniform {
             clipping_min: settings.clipping_aabb.min.to_vec().extend(0.),
             clipping_max: settings.clipping_aabb.max.to_vec().extend(0.),
             step_size: settings.step_size,
-            use_dda: settings.use_dda as u32,
             temporal_filter: settings.temporal_filter as u32,
             distance_scale: settings.distance_scale,
-            _pad: [0; 2],
+            _pad: [0; 3],
         }
     }
 }
@@ -255,10 +314,9 @@ impl Default for RenderSettingsUniform {
             time: 0.,
             time_steps: 1,
             step_size: 0.01,
-            use_dda: 0,
             temporal_filter: wgpu::FilterMode::Nearest as u32,
-            distance_scale:1.,
-            _pad: [0; 2],
+            distance_scale: 1.,
+            _pad: [0; 3],
         }
     }
 }

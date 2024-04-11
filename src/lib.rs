@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap, fs, io::{BufReader, Read, Seek}, sync::Arc
+    collections::HashMap, fs, io::{BufReader, Cursor, Read, Seek}, sync::Arc
 };
 
 use camera::{GenericCamera, PerspectiveCamera};
@@ -15,7 +15,7 @@ use cgmath::{
     vec3, Deg, EuclideanSpace, InnerSpace, Point3, Quaternion, Rotation, Vector2,
     Vector3,
 };
-use egui::{Color32, TextureId};
+use egui::{ Color32, TextureId};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;
@@ -36,8 +36,6 @@ use crate::{
 mod camera;
 mod cmap;
 mod controller;
-mod debug;
-mod lines;
 mod renderer;
 mod ui;
 mod ui_renderer;
@@ -55,30 +53,19 @@ pub struct WGPUContext {
 }
 
 impl WGPUContext {
-    pub async fn new_instance() -> Self {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: Backends::PRIMARY,
-            ..Default::default()
-        });
-
-        return WGPUContext::new(&instance, None).await;
-    }
 
     pub async fn new(instance: &wgpu::Instance, surface: Option<&wgpu::Surface<'static>>) -> Self {
         let adapter = wgpu::util::initialize_adapter_from_env_or_default(instance, surface)
             .await
             .unwrap();
 
-        let required_features = wgpu::Features::FLOAT32_FILTERABLE;
+        let required_features = wgpu::Features::default();
 
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     required_features,
-                    required_limits: wgpu::Limits {
-                        max_bind_groups: 5,
-                        ..wgpu::Limits::downlevel_webgl2_defaults()
-                    },
+                    required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
                     label: None,
                 },
                 None,
@@ -108,18 +95,18 @@ pub struct WindowContext {
 
     background_color: egui::Color32,
 
-    line_renderer: lines::LineRenderer,
-    debug_lines: debug::DebugLines,
-
     volume: Volume,
     renderer: VolumeRenderer,
 
     render_settings: RenderSettings,
     cmaps: HashMap<String,(cmap::ColorMap,TextureId)>,
     selected_cmap: String,
+    cmap: cmap::ColorMap,
 
     playing:bool,
     animation_duration:Duration,
+
+    alpha_tf:Vec<Vector2<f32>>
 }
 
 impl WindowContext {
@@ -136,7 +123,9 @@ impl WindowContext {
 
         let window = Arc::new(window);
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor{
+             backends: Backends::SECONDARY, 
+             ..Default::default() });
 
         let surface: wgpu::Surface = instance.create_surface(window.clone())?;
 
@@ -147,17 +136,16 @@ impl WindowContext {
         let device = &wgpu_context.device;
         let queue = &wgpu_context.queue;
 
-        let surface_caps = surface.get_capabilities(&wgpu_context.adapter);
+        // let surface_caps = surface.get_capabilities(&wgpu_context.adapter);
 
-        let surface_format = surface_caps
-            .formats
-            .iter()
-            .filter(|f| f.is_srgb())
-            .next()
-            .unwrap_or(&surface_caps.formats[0])
-            .clone();
-
-        let render_format = surface_format;
+        // let surface_format = surface_caps
+        //     .formats
+        //     .iter()
+        //     .filter(|f| f.is_srgb())
+        //     .next()
+        //     .unwrap_or(&surface_caps.formats[0])
+        //     .clone();
+        let surface_format = wgpu::TextureFormat::Rgba8UnormSrgb;
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -171,7 +159,7 @@ impl WindowContext {
                 wgpu::PresentMode::AutoVsync
             },
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
-            view_formats: vec![surface_format.remove_srgb_suffix()],
+            view_formats: vec![],
         };
         surface.configure(&device, &config);
 
@@ -181,31 +169,38 @@ impl WindowContext {
         let volume = Volume::load_npz(device, queue, &mut buff_reader)?;
         let renderer = VolumeRenderer::new(device, surface_format);
 
-        let line_renderer = lines::LineRenderer::new(device, render_format);
-        let debug_lines = debug::DebugLines::new(&volume);
-
-        let files = find_files_with_extension_in_folder("colormaps", ".npy");
-        let cmaps: HashMap<String,(ColorMap,TextureId)> = files
-            .iter()
-            .map(|f| {
-                let mut reader =
-                    BufReader::new(fs::File::open(format!("colormaps/{}", f)).unwrap());
-                let name = f.split(".").next().unwrap().to_string();
-                let cmap = ColorMap::from_npz(device, queue, &mut reader).unwrap();
-                let egui_texture:TextureId = ui_renderer.renderer.register_native_texture(
-                    &device,
-                    &cmap.texture.create_view(&Default::default()),
-                    wgpu::FilterMode::Linear,
-                );
-                (name.clone(),(cmap, egui_texture))
-            })
-            .collect();
+        // let files = find_files_with_extension_in_folder("colormaps", ".npy");
+        // let cmaps: HashMap<String,(ColorMap,TextureId)> = files
+        //     .iter()
+        //     .map(|f| {
+        //         let mut reader =
+        //             BufReader::new(fs::File::open(format!("colormaps/{}", f)).unwrap());
+        //         let name = f.split(".").next().unwrap().to_string();
+        //         let cmap = ColorMap::from_npz(device, queue, &mut reader).unwrap();
+        //         let egui_texture:TextureId = ui_renderer.renderer.register_native_texture(
+        //             &device,
+        //             &cmap.texture.create_view(&Default::default()),
+        //             wgpu::FilterMode::Linear,
+        //         );
+        //         (name.clone(),(cmap, egui_texture))
+        //     })
+        //     .collect();
+        let mut cmaps:HashMap<String,(ColorMap,TextureId)> = HashMap::new();
+        let mut reader =
+            Cursor::new(include_bytes!("../colormaps/magma.npy"));
+        let name = "magma";
+        let cmap = ColorMap::from_npz(device, queue, &mut reader).unwrap();
+        let egui_texture:TextureId = ui_renderer.renderer.register_native_texture(
+            &device,
+            &cmap.texture.create_view(&Default::default()),
+            wgpu::FilterMode::Linear,
+        );
+        cmaps.insert(name.to_string(),(cmap, egui_texture));
 
         
 
         let render_settings = RenderSettings {
             clipping_aabb: Aabb::unit(),
-            use_dda: false,
             time: 0.,
             step_size: 2. / 1000.,
             spatial_filter: wgpu::FilterMode::Linear,
@@ -238,9 +233,11 @@ impl WindowContext {
         //         -1000.,
         //     ),
         // );
-        let selected_cmap = "magma".to_string();
+        let selected_cmap = "magma";
+        let cmap = cmaps[selected_cmap].0.clone(device, queue);
 
         let animation_duration =Duration::from_secs_f32(volume.timesteps as f32*0.05);
+
 
         Ok(Self {
             wgpu_context,
@@ -256,13 +253,13 @@ impl WindowContext {
 
             volume,
             renderer,
-            line_renderer,
-            debug_lines,
             render_settings,
             cmaps,
-            selected_cmap,
+            cmap,
             animation_duration,
             playing: true,
+            alpha_tf:vec![Vector2::new(0.,0.),Vector2::new(1.,1.)],
+            selected_cmap:selected_cmap.to_string()
         })
     }
 
@@ -322,12 +319,6 @@ impl WindowContext {
             &self.render_settings,
         );
 
-        self.line_renderer.prepare(
-            &mut encoder,
-            &self.wgpu_context.queue,
-            &self.wgpu_context.device,
-            &self.debug_lines.visible_lines(),
-        );
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("render pass"),
@@ -347,9 +338,7 @@ impl WindowContext {
                 ..Default::default()
             });
             self.renderer
-                .render(&mut render_pass, &self.volume, &self.cmaps[&self.selected_cmap].0);
-            self.line_renderer
-                .render(&mut render_pass, &self.renderer.camera);
+                .render(&mut render_pass,  &self.cmap);
         }
 
         self.wgpu_context
@@ -441,6 +430,16 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(file: R, config
 
     let mut state = WindowContext::new(window, file, &config).await.unwrap();
 
+    #[cfg(target_arch = "wasm32")]
+    web_sys::window()
+        .and_then(|win| win.document())
+        .and_then(|doc| {
+            doc.get_element_by_id("spinner")
+                .unwrap()
+                .set_attribute("style", "display:none;")
+                .unwrap();
+            doc.body()
+        });
     let mut last = Instant::now();
 
     event_loop.run(move |event,target| 
@@ -518,3 +517,22 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(file: R, config
         _ => {},
     }).unwrap();
 }
+
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub async fn run_wasm(volume: Vec<u8>) {
+    use std::io::Cursor;
+    // #[cfg(debug_assertions)]
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+    console_log::init().expect("could not initialize logger");
+    let pc_reader = Cursor::new(volume);
+
+    wasm_bindgen_futures::spawn_local(open_window(
+        pc_reader,
+        RenderConfig {
+            no_vsync: false,
+        },
+    ));
+}
+

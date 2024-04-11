@@ -8,8 +8,8 @@ description = "4D Volume Viewer"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wgpu = { version = "0.19.1" }
-winit = "0.29.10"
+wgpu = { version = "0.19.3", features = ["webgl"] }
+winit = "0.29.15"
 cgmath = { version = "0.18.0", features = [
     "bytemuck",
 ], git = 'https://github.com/rustgd/cgmath' }
@@ -34,8 +34,28 @@ futures-intrusive = "0.5.0"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster = { version = "0.3.0", features = ["macro"] }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+
+getrandom = { version = "0.2", features = ["js"] }
+wasm-bindgen = "0.2.92"
+console_error_panic_hook = "0.1.7"
+wasm-bindgen-futures = "0.4.42"
+console_log = "1"
+log = "0.4"
+instant = { version = "0.1.12", features = ["wasm-bindgen"] }
+web-sys = { version = "0.3.69" }
+
+[dev-dependencies]
+wasm-bindgen-cli = "0.2.92"
+
 [lib]
 path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
 
 [[bin]]
 name = "viewer"
+
+[profile.web-release]
+inherits = "release"
+opt-level = "s"
+strip = "debuginfo"

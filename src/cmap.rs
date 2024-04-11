@@ -1,26 +1,19 @@
 use std::io::{Read, Seek};
 
+use anyhow::Ok;
+use cgmath::{Vector2, Vector4};
 use wgpu::{util::DeviceExt, Extent3d};
 
 #[derive(Debug)]
 pub struct ColorMap {
+    pub values: Vec<Vector4<u8>>,
     pub texture: wgpu::Texture,
     pub bindgroup: wgpu::BindGroup,
 }
 
-
 impl ColorMap {
-    pub fn from_npz<'a, R>(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        reader: &'a mut R,
-    ) -> anyhow::Result<Self>
-    where
-        R: Read + Seek,
-    {
-        let npz_file = npyz::NpyFile::new(reader)?;
-        let n = npz_file.shape()[0];
-        let data: Vec<u8> = npz_file.into_vec::<f32>()?.into_iter().map(|x|(x*255.) as u8).collect();
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, values: Vec<Vector4<u8>>) -> Self {
+        let n = values.len();
         let texture = device.create_texture_with_data(
             queue,
             &wgpu::TextureDescriptor {
@@ -38,7 +31,7 @@ impl ColorMap {
                 view_formats: &[],
             },
             wgpu::util::TextureDataOrder::LayerMajor,
-            data.as_slice(),
+            bytemuck::cast_slice(&values),
         );
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -64,10 +57,35 @@ impl ColorMap {
                 },
             ],
         });
-        Ok(Self {
+        Self {
             texture,
             bindgroup,
-        })
+            values,
+        }
+    }
+
+    pub fn from_npz<'a, R>(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        reader: &'a mut R,
+    ) -> anyhow::Result<Self>
+    where
+        R: Read + Seek,
+    {
+        let npz_file = npyz::NpyFile::new(reader)?;
+        let values: Vec<_> = npz_file
+            .into_vec::<f32>()?
+            .chunks_exact(4)
+            .map(|v| {
+                Vector4::new(
+                    (v[0] * 255.) as u8,
+                    (v[1] * 255.) as u8,
+                    (v[2] * 255.) as u8,
+                    (v[3] * 255.) as u8,
+                )
+            })
+            .collect();
+        Ok(Self::new(device, queue, values))
     }
 
     pub(crate) fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -93,4 +111,31 @@ impl ColorMap {
             ],
         })
     }
+
+    pub fn clone(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+        Self::new(device, queue, self.values.clone())
+    }
+}
+
+pub fn rasterize_tf(points: &[Vector2<f32>], n: u32) -> Vec<u8> {
+    assert!(points.len() >= 2, "spline must have at least 2 points");
+    let mut values = vec![0; n as usize];
+    let mut last_i = 0;
+    let mut current_i = 1;
+    for i in 0..n {
+        let x = i as f32 / (n - 1) as f32;
+        let last = points[last_i];
+        let current = points[current_i];
+        if (last.x - current.x).abs() < 0.5 / n as f32 {
+            values[i as usize] = (last.y * 255.) as u8;
+        } else {
+            let y = last.y + (current.y - last.y) * (x - last.x) / (current.x - last.x);
+            values[i as usize] = (y * 255.) as u8;
+        }
+        if x > points[current_i].x {
+            last_i = current_i;
+            current_i += 1;
+        }
+    }
+    values
 }

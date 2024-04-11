@@ -17,8 +17,7 @@ struct Settings {
     time: f32,
     time_steps: u32,
     step_size: f32,
-    use_dda: u32,
-    temporal_filter:u32,
+    temporal_filter: u32,
     distance_scale: f32,
 }
 
@@ -51,42 +50,37 @@ fn create_ray(view_inv: mat4x4<f32>, proj_inv: mat4x4<f32>, px: vec2<f32>) -> Ra
     start.y *= -1.;
     // depth prepass location
     var start_w = view_inv * proj_inv * start;
-    start_w /= start_w.w+1e-4;
+    start_w /= start_w.w + 1e-4;
 
 
     var end = vec4<f32>((px * 2. - (1.)), -1., 1.);
     end.y *= -1.;
     // depth prepass location
     var end_w = view_inv * proj_inv * end;
-    end_w /= end_w.w+1e-4;
+    end_w /= end_w.w + 1e-4;
 
     return Ray(
         end_w.xyz,
-        -normalize(end_w.xyz-start_w.xyz),
+        -normalize(end_w.xyz - start_w.xyz),
     );
-}
-
-struct DDAState {
-    mask: vec3<bool>,
-    side_dist: vec3<f32>,
-    delta_dist: vec3<f32>,
-    ray_step: vec3<f32>,
-    last_distance: f32,
 }
 
 @group(0) @binding(0)
 var volume : texture_3d<f32>;
 @group(0) @binding(1)
 var volume_next : texture_3d<f32>;
+@group(0) @binding(2)
+var volume_sampler: sampler;
+
 @group(1) @binding(0)
 var<uniform> camera: CameraUniforms;
+
 @group(2) @binding(0)
 var<uniform> settings: Settings;
+
 @group(3) @binding(0)
-var volume_sampler: sampler;
-@group(4) @binding(0)
 var cmap : texture_2d<f32>;
-@group(4) @binding(1)
+@group(3) @binding(1)
 var cmap_sampler: sampler;
 
 struct VertexOut {
@@ -107,31 +101,6 @@ fn vs_main(
     return VertexOut(vec4<f32>(xy * 2. - (1.), 0., 1.), vec2<f32>(xy.x, 1. - xy.y));
 }
 
-// performs a dda step and returns the next sampling position (xyz component) and step size (w component)
-fn next_pos_dda(pos: ptr<function,vec3<f32>>, state: ptr<function,DDAState>) -> vec4<f32> {
-    let curr_pos = *pos;
-    var st = *state;
-
-    st.mask = st.side_dist.xyz <= min(st.side_dist.yzx, st.side_dist.zxy);
-    st.side_dist += vec3<f32>(st.mask) * st.delta_dist;
-
-    let d = length(vec3<f32>(st.mask) * (st.side_dist - st.delta_dist));
-
-    let step_size = d - st.last_distance;
-    st.last_distance = d;
-
-    (*pos) += vec3<f32>(st.mask) * st.ray_step;
-    *state = st;
-
-    // we want to sample at the middle of each voxel
-    let inv_size = 1. / vec3<f32>(textureDimensions(volume));
-    let sample_pos = curr_pos * inv_size;
-    return vec4<f32>(
-        sample_pos,
-        step_size
-    );
-}
-
 // performs a step and returns the NDC cooidinate for the volume sampling
 fn next_pos(pos: ptr<function,vec3<f32>>, step_size: f32, ray_dir: vec3<f32>) -> vec4<f32> {
     let aabb = settings.volume_aabb;
@@ -144,16 +113,17 @@ fn next_pos(pos: ptr<function,vec3<f32>>, step_size: f32, ray_dir: vec3<f32>) ->
     );
 }
 
-fn sample_volume(pos:vec3<f32>)->f32{
-    let sample_curr = textureSample(volume, volume_sampler, pos).r;
-    if settings.temporal_filter == FILTER_NEAREST{
+fn sample_volume(pos: vec3<f32>) -> f32 {
+    let sample_curr = textureSampleLevel(volume, volume_sampler, pos, 0.).r;
+    let sample_next = textureSampleLevel(volume_next, volume_sampler, pos, 0.).r;
+    if settings.temporal_filter == FILTER_NEAREST {
         return sample_curr;
-    }else{
-        let sample_next = textureSample(volume_next, volume_sampler, pos).r;
-        let time_fraction = fract(settings.time * f32(settings.time_steps-1));
+    } else {
+        let time_fraction = fract(settings.time * f32(settings.time_steps - (1)));
         return mix(sample_curr, sample_next, time_fraction);
     }
 }
+
 
 // traces ray trough volume and returns color
 fn trace_ray(ray_in: Ray) -> vec4<f32> {
@@ -171,7 +141,7 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
         return vec4<f32>(0.);
     }
 
-    let start = max(0., intersec.x)+1e-4;
+    let start = max(0., intersec.x) + 1e-4;
     ray.orig += start * ray.dir;
 
     var iters = 0u;
@@ -181,57 +151,38 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
     let volume_size = textureDimensions(volume);
 
     var distance_scale = settings.distance_scale;
-    let use_dda = settings.use_dda;
-    if bool(use_dda) {
-        let inv_size = 1. / vec3<f32>(volume_size);
-        distance_scale *= length(inv_size);
-    }
-
 
     var pos = ray.orig;
-    var state: DDAState;
 
-    if bool(use_dda) {
-        let pos_f = (ray.orig - aabb.min) / aabb_size * (vec3<f32>(volume_size) - (1.));
-        pos = round(pos_f);
-        state.mask = vec3<bool>(false);
-        state.delta_dist = 1. / abs(ray.dir);
-        state.ray_step = sign(ray.dir);
-        state.side_dist = ((0.5 - (pos_f - pos)) * state.ray_step) * state.delta_dist;
-        state.last_distance = 0.;
-    }
     let early_stopping_t = 1. / 255.;
     let step_size_g = settings.step_size;
     var sample_pos: vec4<f32>;
     loop{
-
-        if bool(use_dda) {
-            sample_pos = next_pos_dda(&pos, &state);
-        } else {
-            sample_pos = next_pos(&pos, step_size_g, ray.dir);
-        }
+        sample_pos = next_pos(&pos, step_size_g, ray.dir);
         let step_size = sample_pos.w;
 
         let sample = sample_volume(sample_pos.xyz);
-        let color_tf = textureSample(cmap, cmap_sampler, vec2<f32>(sample,0.5));
-        let sigma =color_tf.a;
+        let color_tf = textureSampleLevel(cmap, cmap_sampler, vec2<f32>(sample, 0.5), 0.);
+        let sigma = color_tf.a;
 
         if sigma > 0. {
             var sample_color = color_tf.rgb;
-            color += exp(-transmittance) * (1. - exp(-sigma * step_size * distance_scale)) * sample_color ;
-            transmittance += sigma * step_size * distance_scale;
-            
+            let a_i = log(1. / (1. - sigma + 1e-4)) * step_size * distance_scale;
+            color += exp(-transmittance) * (1. - exp(-a_i)) * sample_color;
+            transmittance += a_i;
+
             if exp(-transmittance) <= early_stopping_t {
                 // scale value to full "energy"
-                color /= 1. - exp(-transmittance);
-                transmittance = 1e6;
+                // color /= 1. - exp(-transmittance);
+                // transmittance = 1e6;
                 break;
             }
+            // break;
         }
         // check if within slice
         let slice_test = any(sample_pos.xyz < settings.clipping.min) || any(sample_pos.xyz > settings.clipping.max) ;
 
-        if slice_test|| iters > 10000 {
+        if slice_test || iters > 10000 {
             break;
         }
         iters += 1u;
