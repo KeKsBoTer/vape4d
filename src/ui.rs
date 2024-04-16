@@ -1,7 +1,7 @@
-use std::{future::IntoFuture, time::Duration};
+use std::time::Duration;
 
 use egui::vec2;
-use egui_plot::{Plot, PlotImage, PlotPoint, PlotPoints};
+use egui_plot::{Plot, PlotImage, PlotPoint};
 
 use crate::{
     cmap::{rasterize_tf, ColorMap},
@@ -103,39 +103,6 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 );
                 ui.end_row();
 
-                ui.label("Temporal Interpolation");
-                egui::ComboBox::new("filter_temporal", "")
-                    .selected_text(filter_mode_name(&state.render_settings.temporal_filter))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut state.render_settings.temporal_filter,
-                            wgpu::FilterMode::Nearest,
-                            filter_mode_name(&wgpu::FilterMode::Nearest),
-                        );
-                        ui.selectable_value(
-                            &mut state.render_settings.temporal_filter,
-                            wgpu::FilterMode::Linear,
-                            filter_mode_name(&wgpu::FilterMode::Linear),
-                        );
-                    });
-                ui.end_row();
-
-                ui.label("Spatial Interpolation");
-                egui::ComboBox::new("filter_spatial", "")
-                    .selected_text(filter_mode_name(&state.render_settings.spatial_filter))
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut state.render_settings.spatial_filter,
-                            wgpu::FilterMode::Nearest,
-                            filter_mode_name(&wgpu::FilterMode::Nearest),
-                        );
-                        ui.selectable_value(
-                            &mut state.render_settings.spatial_filter,
-                            wgpu::FilterMode::Linear,
-                            filter_mode_name(&wgpu::FilterMode::Linear),
-                        );
-                    });
-                ui.end_row();
             });
     });
 
@@ -165,7 +132,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
             let max_value = state.volume.max_value;
             let width = max_value - min_value;
             let height = width / 5.;
-            let (cmap, texture) = state.cmaps.get(&state.selected_cmap).unwrap();
+            let (_cmap, texture) = state.cmaps.get(&state.selected_cmap).unwrap();
             let image = PlotImage::new(
                 *texture,
                 PlotPoint::new(min_value + width * 0.5, height / 2.),
@@ -220,12 +187,6 @@ pub(crate) fn ui(state: &mut WindowContext) {
     });
 }
 
-fn filter_mode_name(mode: &wgpu::FilterMode) -> &'static str {
-    match mode {
-        wgpu::FilterMode::Nearest => "Nearest",
-        wgpu::FilterMode::Linear => "Linear",
-    }
-}
 
 use cgmath::{Vector2, Vector4};
 use egui::{epaint::PathShape, *};

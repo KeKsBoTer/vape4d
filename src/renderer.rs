@@ -1,19 +1,16 @@
 use crate::{
     camera::{GenericCamera, Projection, VIEWPORT_Y_FLIP},
     cmap::ColorMap,
-    uniform::UniformBuffer,
     volume::{Aabb, Volume},
 };
 
 use cgmath::{EuclideanSpace, Matrix4, SquareMatrix, Vector4, Zero};
+use wgpu::util::DeviceExt;
 
 pub struct VolumeRenderer {
     pipeline: wgpu::RenderPipeline,
-    pub(crate) camera: UniformBuffer<CameraUniform>,
-    settings: UniformBuffer<RenderSettingsUniform>,
     sampler_nearest: wgpu::Sampler,
     sampler_linear: wgpu::Sampler,
-    bind_group: Option<wgpu::BindGroup>,
 }
 
 impl VolumeRenderer {
@@ -22,8 +19,6 @@ impl VolumeRenderer {
             label: Some("render pipeline layout"),
             bind_group_layouts: &[
                 &Self::bind_group_layout(device),
-                &UniformBuffer::<CameraUniform>::bind_group_layout(device),
-                &UniformBuffer::<RenderSettingsUniform>::bind_group_layout(device),
                 &ColorMap::bind_group_layout(device),
             ],
             push_constant_ranges: &[],
@@ -32,7 +27,7 @@ impl VolumeRenderer {
         let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/raymarch.wgsl"));
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("render pipeline"),
+            label: Some("volume render pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -75,39 +70,36 @@ impl VolumeRenderer {
             ..Default::default()
         });
 
-        let camera = UniformBuffer::new_default(device, Some("camera uniform buffer"));
-        let settings = UniformBuffer::new_default(device, Some("render settings uniform buffer"));
-
         VolumeRenderer {
             pipeline,
-            camera,
             sampler_nearest,
             sampler_linear,
-            bind_group: None,
-            settings,
         }
     }
 
-    pub fn prepare<P: Projection>(
+    pub fn prepare<'a,P: Projection>(
         &mut self,
-        _encoder: &mut wgpu::CommandEncoder,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
         volume: &Volume,
-        camera: GenericCamera<P>,
+        camera: &GenericCamera<P>,
         render_settings: &RenderSettings,
-    ) {
-        let uniform = self.camera.as_mut();
-        uniform.set_camera(camera);
-        self.camera.sync(queue);
+        cmap: &'a ColorMap,
+    ) -> PerFrameData<'a> {
+        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+            label: Some("camera buffer"),
+            contents: bytemuck::bytes_of(&CameraUniform::from(camera)),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
 
-        let settings = self.settings.as_mut();
 
-        *settings = RenderSettingsUniform::from_settings(&render_settings, volume);
-        self.settings.sync(queue);
+        let settings_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+            label: Some("settnigs buffer"),
+            contents: bytemuck::bytes_of(&RenderSettingsUniform::from_settings(&render_settings, volume)),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+
         let step = ((volume.timesteps - 1) as f32 * render_settings.time) as usize;
-
-        self.bind_group = Some(
+        let bind_group = 
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("volume renderer bind group"),
                 layout: &Self::bind_group_layout(device),
@@ -136,20 +128,29 @@ impl VolumeRenderer {
                             },
                         ),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource:wgpu::BindingResource::Buffer(camera_buffer.as_entire_buffer_binding()),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource:wgpu::BindingResource::Buffer(settings_buffer.as_entire_buffer_binding()),
+                    },
                 ],
-            }),
-        );
+            });
+        PerFrameData {
+            bind_group,
+            cmap_bind_group: &cmap.bindgroup,
+        }
     }
 
     pub fn render<'rpass>(
         &'rpass self,
         render_pass: &mut wgpu::RenderPass<'rpass>,
-        cmap: &'rpass ColorMap,
+        frame_data: &'rpass PerFrameData,
     ) {
-        render_pass.set_bind_group(0, self.bind_group.as_ref().unwrap(), &[]);
-        render_pass.set_bind_group(1, self.camera.bind_group(), &[]);
-        render_pass.set_bind_group(2, self.settings.bind_group(), &[]);
-        render_pass.set_bind_group(3, &cmap.bindgroup, &[]);
+        render_pass.set_bind_group(0, &frame_data.bind_group, &[]);
+        render_pass.set_bind_group(1, frame_data.cmap_bind_group, &[]);
         render_pass.set_pipeline(&self.pipeline);
 
         render_pass.draw(0..4, 0..1);
@@ -185,9 +186,34 @@ impl VolumeRenderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         })
     }
+}
+
+pub struct PerFrameData<'a> {
+    bind_group: wgpu::BindGroup,
+    cmap_bind_group: &'a wgpu::BindGroup,
 }
 
 #[repr(C)]
@@ -217,6 +243,7 @@ impl Default for CameraUniform {
 }
 
 impl CameraUniform {
+
     pub(crate) fn set_view_mat(&mut self, view_matrix: Matrix4<f32>) {
         self.view_matrix = view_matrix;
         self.view_inv_matrix = view_matrix.invert().unwrap();
@@ -227,9 +254,17 @@ impl CameraUniform {
         self.proj_inv_matrix = proj_matrix.invert().unwrap();
     }
 
-    pub fn set_camera(&mut self, camera: GenericCamera<impl Projection>) {
+    pub fn set_camera(&mut self, camera: &GenericCamera<impl Projection>) {
         self.set_proj_mat(camera.proj_matrix());
         self.set_view_mat(camera.view_matrix());
+    }
+}
+
+impl<P:Projection> From<&GenericCamera<P>> for CameraUniform {
+    fn from(camera: &GenericCamera<P>) -> Self {
+        let mut uniform = CameraUniform::default();
+        uniform.set_camera(camera);
+        uniform
     }
 }
 

@@ -1,8 +1,7 @@
-use std::{
-    borrow::Borrow, collections::HashMap, fs, io::{BufReader, Cursor, Read, Seek}, sync::Arc
+use std::{ collections::HashMap,  io::{BufReader, Cursor, Read, Seek}, sync::Arc
 };
 
-use camera::{ GenericCamera, OrthographicProjection, PerspectiveCamera};
+use camera::{ GenericCamera, PerspectiveCamera};
 use controller::CameraController;
 #[cfg(target_arch = "wasm32")]
 use instant::{Duration, Instant};
@@ -12,7 +11,7 @@ use std::time::{Duration, Instant};
 use wgpu::Backends;
 
 use cgmath::{
-    vec3, Deg, EuclideanSpace, InnerSpace, One, Point3, Quaternion, Rotation, Vector2, Vector3
+    vec3, Deg, EuclideanSpace, InnerSpace,  Point3, Quaternion, Rotation, Vector2, Vector3
 };
 use egui::{ Color32, TextureId};
 
@@ -295,13 +294,12 @@ impl WindowContext {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("render command encoder"),
                 });
-        self.renderer.prepare(
-            &mut encoder,
+        let frame_data = self.renderer.prepare(
             &self.wgpu_context.device,
-            &self.wgpu_context.queue,
             &self.volume,
-            self.camera.clone(),
+            &self.camera,
             &self.render_settings,
+            &self.cmap
         );
 
         {
@@ -323,7 +321,7 @@ impl WindowContext {
                 ..Default::default()
             });
             self.renderer
-                .render(&mut render_pass,  &self.cmap);
+                .render(&mut render_pass,  &frame_data);
         }
 
         self.wgpu_context

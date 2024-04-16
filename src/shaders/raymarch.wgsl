@@ -72,15 +72,15 @@ var volume_next : texture_3d<f32>;
 @group(0) @binding(2)
 var volume_sampler: sampler;
 
-@group(1) @binding(0)
+@group(0) @binding(3)
 var<uniform> camera: CameraUniforms;
 
-@group(2) @binding(0)
+@group(0) @binding(4)
 var<uniform> settings: Settings;
 
-@group(3) @binding(0)
+@group(1) @binding(0)
 var cmap : texture_2d<f32>;
-@group(3) @binding(1)
+@group(1) @binding(1)
 var cmap_sampler: sampler;
 
 struct VertexOut {
@@ -172,12 +172,8 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
             transmittance += a_i;
 
             if exp(-transmittance) <= early_stopping_t {
-                // scale value to full "energy"
-                // color /= 1. - exp(-transmittance);
-                // transmittance = 1e6;
                 break;
             }
-            // break;
         }
         // check if within slice
         let slice_test = any(sample_pos.xyz < settings.clipping.min) || any(sample_pos.xyz > settings.clipping.max) ;
