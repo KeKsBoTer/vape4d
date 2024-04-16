@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{future::IntoFuture, time::Duration};
 
 use egui::vec2;
 use egui_plot::{Plot, PlotImage, PlotPoint, PlotPoints};
@@ -136,7 +136,13 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         );
                     });
                 ui.end_row();
+            });
+    });
 
+    egui::Window::new("Transfer Function")
+        .default_size(vec2(300., 50.))
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
                 ui.label("Colormap");
                 egui::ComboBox::new("cmap_select", "")
                     .selected_text(state.selected_cmap.as_str())
@@ -154,11 +160,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         }
                     });
             });
-    });
 
-    egui::Window::new("Transfer Function")
-        .default_size(vec2(300., 50.))
-        .show(ctx, |ui| {
             let min_value = state.volume.min_value;
             let max_value = state.volume.max_value;
             let width = max_value - min_value;
@@ -169,7 +171,6 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 PlotPoint::new(min_value + width * 0.5, height / 2.),
                 vec2(width, height),
             );
-
             let plot = Plot::new("items_demo")
                 .show_x(true)
                 .show_y(false)
@@ -185,6 +186,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
             plot.show(ui, |plot_ui| {
                 plot_ui.image(image.name("Image"));
             });
+            ui.label("Alpha Channel");
             tf_ui(ui, &mut state.alpha_tf);
         });
 

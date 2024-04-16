@@ -134,91 +134,10 @@
     </div>
     <script type="module">
 
-        async function checkWebGPU() {
-            if (!navigator.gpu) {
-                return false;
-            }
-            try {
-                let adapter = await navigator.gpu.requestAdapter()
-                let device = await adapter.requestDevice();
-                return true
-            } catch (e) {
-                return false;
-            }
-        }
-
-        //if (!await checkWebGPU()) {
-        //    document.getElementById("no-webgpu").style.display = "flex";
-        //    throw Error("WebGPU not supported.");
-        //}
-
         import init, { run_wasm } from "./v4dv.js";
         let init_promise = init();
-
-        let params = new URLSearchParams(window.location.search);
-        let pc_file = params.get("file");
-
-
-        function withProgress(response) {
-            if (!response.ok) {
-                throw new Error("Cannot download file", { cause: response });
-            }
-            const contentEncoding = response.headers.get('content-encoding');
-            const contentLength = response.headers.get(contentEncoding ? 'x-file-size' : 'content-length');
-            if (contentLength === null) {
-                throw Error('Response size header unavailable');
-            }
-            const total = parseInt(contentLength, 10);
-            let loaded = 0;
-            return new Response(
-                new ReadableStream({
-                    start(controller) {
-                        const reader = response.body.getReader();
-
-                        read();
-                        function read() {
-                            reader.read().then(({ done, value }) => {
-                                if (done) {
-                                    controller.close();
-                                    return;
-                                }
-                                loaded += value.byteLength;
-                                document.querySelector('.meter-1').style.strokeDashoffset = 360 - Math.round(loaded / total * 360);
-                                document.querySelector('#loading-display').innerHTML = Math.round(loaded / (1024 * 1024) * 10) / 10 + " MB"
-                                controller.enqueue(value);
-                                read();
-                            }).catch(error => {
-                                console.error(error);
-                                controller.error(error)
-                            })
-                        }
-                    }
-                })
-            );
-        }
-        if (!pc_file) {
-            document.getElementById("no-file").style.display = "flex";
-        } else {
-            try {
-                document.getElementById("spinner").style.display = "flex";
-                let pc_data = await fetch(pc_file).then(withProgress).then(response => response.arrayBuffer()).then(data => new Uint8Array(data));
-                await init_promise;
-                run_wasm(pc_data);
-            } catch (e) {
-                document.getElementById("spinner").style.display = "none";
-                let errorPane = document.getElementById("loading-error");
-                errorPane.style.display = "flex";
-                console.error(e);
-                errorPane.getElementsByTagName("p")[0].innerHTML = e.message + ("cause" in e ? ": " + e.cause.statusText : "") + "<pre>" + pc_file + "</pre>";
-                console.error(e.cause.statusText);
-            }
-            window.addEventListener('resize', function (event) {
-                document.getElementById("window-canvas").width = window.innerWidth;
-                document.getElementById("window-canvas").height = window.innerHeight;
-            }, true);
-
-            document.addEventListener('contextmenu', event => event.preventDefault());
-        }
+        await init_promise;
+        run_wasm();
     </script>
 </body>
 

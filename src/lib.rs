@@ -1,8 +1,8 @@
 use std::{
-    collections::HashMap, fs, io::{BufReader, Cursor, Read, Seek}, sync::Arc
+    borrow::Borrow, collections::HashMap, fs, io::{BufReader, Cursor, Read, Seek}, sync::Arc
 };
 
-use camera::{GenericCamera, PerspectiveCamera};
+use camera::{ GenericCamera, OrthographicProjection, PerspectiveCamera};
 use controller::CameraController;
 #[cfg(target_arch = "wasm32")]
 use instant::{Duration, Instant};
@@ -12,8 +12,7 @@ use std::time::{Duration, Instant};
 use wgpu::Backends;
 
 use cgmath::{
-    vec3, Deg, EuclideanSpace, InnerSpace, Point3, Quaternion, Rotation, Vector2,
-    Vector3,
+    vec3, Deg, EuclideanSpace, InnerSpace, One, Point3, Quaternion, Rotation, Vector2, Vector3
 };
 use egui::{ Color32, TextureId};
 
@@ -32,6 +31,9 @@ use crate::{
     cmap::ColorMap,
     volume::{Aabb, Volume},
 };
+use include_dir::{include_dir, Dir};
+
+static COLORMAP_DIR: Dir = include_dir!("colormaps");
 
 mod camera;
 mod cmap;
@@ -124,7 +126,7 @@ impl WindowContext {
         let window = Arc::new(window);
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor{
-             backends: Backends::SECONDARY, 
+             backends: Backends::all().symmetric_difference(Backends::BROWSER_WEBGPU), 
              ..Default::default() });
 
         let surface: wgpu::Surface = instance.create_surface(window.clone())?;
@@ -136,16 +138,16 @@ impl WindowContext {
         let device = &wgpu_context.device;
         let queue = &wgpu_context.queue;
 
-        // let surface_caps = surface.get_capabilities(&wgpu_context.adapter);
+        let surface_caps = surface.get_capabilities(&wgpu_context.adapter);
 
-        // let surface_format = surface_caps
-        //     .formats
-        //     .iter()
-        //     .filter(|f| f.is_srgb())
-        //     .next()
-        //     .unwrap_or(&surface_caps.formats[0])
-        //     .clone();
-        let surface_format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let surface_format = surface_caps
+            .formats
+            .iter()
+            .filter(|f| f.is_srgb())
+            .next()
+            .unwrap_or(&surface_caps.formats[0])
+            .clone();
+        let surface_format = surface_format;
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -169,34 +171,20 @@ impl WindowContext {
         let volume = Volume::load_npz(device, queue, &mut buff_reader)?;
         let renderer = VolumeRenderer::new(device, surface_format);
 
-        // let files = find_files_with_extension_in_folder("colormaps", ".npy");
-        // let cmaps: HashMap<String,(ColorMap,TextureId)> = files
-        //     .iter()
-        //     .map(|f| {
-        //         let mut reader =
-        //             BufReader::new(fs::File::open(format!("colormaps/{}", f)).unwrap());
-        //         let name = f.split(".").next().unwrap().to_string();
-        //         let cmap = ColorMap::from_npz(device, queue, &mut reader).unwrap();
-        //         let egui_texture:TextureId = ui_renderer.renderer.register_native_texture(
-        //             &device,
-        //             &cmap.texture.create_view(&Default::default()),
-        //             wgpu::FilterMode::Linear,
-        //         );
-        //         (name.clone(),(cmap, egui_texture))
-        //     })
-        //     .collect();
-        let mut cmaps:HashMap<String,(ColorMap,TextureId)> = HashMap::new();
-        let mut reader =
-            Cursor::new(include_bytes!("../colormaps/magma.npy"));
-        let name = "magma";
-        let cmap = ColorMap::from_npz(device, queue, &mut reader).unwrap();
-        let egui_texture:TextureId = ui_renderer.renderer.register_native_texture(
-            &device,
-            &cmap.texture.create_view(&Default::default()),
-            wgpu::FilterMode::Linear,
-        );
-        cmaps.insert(name.to_string(),(cmap, egui_texture));
-
+        let cmaps: HashMap<String,(ColorMap,TextureId)> = COLORMAP_DIR.files()
+            .filter_map(|f| {
+                let mut reader = Cursor::new(f.contents());
+                let name = f.path().file_stem().unwrap().to_str().unwrap().to_string();
+                let cmap = ColorMap::from_npz(device, queue, &mut reader).unwrap();
+                let egui_texture:TextureId = ui_renderer.renderer.register_native_texture(
+                    &device,
+                    &cmap.texture.create_view(&Default::default()),
+                    wgpu::FilterMode::Linear,
+                );
+                Some((name.clone(),(cmap, egui_texture)))
+            })
+            .collect();
+    
         
 
         let render_settings = RenderSettings {
@@ -267,9 +255,7 @@ impl WindowContext {
         if new_size.width > 0 && new_size.height > 0 {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
-            self.camera
-                .projection
-                .resize(new_size.width, new_size.height);
+            self.camera.projection.resize(new_size.width, new_size.height);
             self.surface
                 .configure(&self.wgpu_context.device, &self.config);
         }
@@ -309,7 +295,6 @@ impl WindowContext {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("render command encoder"),
                 });
-
         self.renderer.prepare(
             &mut encoder,
             &self.wgpu_context.device,
@@ -370,21 +355,6 @@ impl WindowContext {
     }
 }
 
-fn find_files_with_extension_in_folder(folder_path: &str, extension: &str) -> Vec<String> {
-    let mut files = Vec::new();
-    if let Ok(entries) = fs::read_dir(folder_path) {
-        for entry in entries {
-            if let Ok(entry) = entry {
-                if let Some(file_name) = entry.file_name().to_str() {
-                    if file_name.ends_with(extension) {
-                        files.push(file_name.to_string());
-                    }
-                }
-            }
-        }
-    }
-    files
-}
 
 pub fn smoothstep(x: f32) -> f32 {
     return x * x * (3.0 - 2.0 * x);
@@ -394,6 +364,7 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(file: R, config
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
     let event_loop = EventLoop::new().unwrap();
+
 
     let window_size = PhysicalSize::new(800, 600);
 
@@ -440,6 +411,7 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(file: R, config
                 .unwrap();
             doc.body()
         });
+
     let mut last = Instant::now();
 
     event_loop.run(move |event,target| 
@@ -521,18 +493,23 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(file: R, config
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub async fn run_wasm(volume: Vec<u8>) {
+pub async fn run_wasm() {
     use std::io::Cursor;
-    // #[cfg(debug_assertions)]
+    #[cfg(debug_assertions)]
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     console_log::init().expect("could not initialize logger");
-    let pc_reader = Cursor::new(volume);
 
-    wasm_bindgen_futures::spawn_local(open_window(
-        pc_reader,
-        RenderConfig {
-            no_vsync: false,
-        },
-    ));
+    loop {
+        if let Some(reader) = rfd::AsyncFileDialog::new().set_title("Select npz file").pick_file().await {
+            let reader = Cursor::new(reader.read().await);
+            wasm_bindgen_futures::spawn_local(open_window(
+                reader,
+                RenderConfig {
+                    no_vsync: false,
+                },
+            ));
+            break;
+        }
+    }
 }
 

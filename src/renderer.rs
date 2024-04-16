@@ -5,18 +5,15 @@ use crate::{
     volume::{Aabb, Volume},
 };
 
-use wgpu::util::DeviceExt;
-
 use cgmath::{EuclideanSpace, Matrix4, SquareMatrix, Vector4, Zero};
 
 pub struct VolumeRenderer {
     pipeline: wgpu::RenderPipeline,
     pub(crate) camera: UniformBuffer<CameraUniform>,
     settings: UniformBuffer<RenderSettingsUniform>,
-    // filter_bg_nearest: wgpu::BindGroup,
-    // filter_bg_linear: wgpu::BindGroup,
+    sampler_nearest: wgpu::Sampler,
+    sampler_linear: wgpu::Sampler,
     bind_group: Option<wgpu::BindGroup>,
-    filter_mode: wgpu::FilterMode,
 }
 
 impl VolumeRenderer {
@@ -65,37 +62,18 @@ impl VolumeRenderer {
             multiview: None,
         });
 
-        // let filter_bg_linear = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        //     label: Some("volume renderer bind group"),
-        //     layout: &Self::bind_group_layout(device),
-        //     entries: &[wgpu::BindGroupEntry {
-        //         binding: 0,
-        //         resource: wgpu::BindingResource::Sampler(&device.create_sampler(
-        //             &wgpu::SamplerDescriptor {
-        //                 label: Some("volume sampler"),
-        //                 mag_filter: wgpu::FilterMode::Linear,
-        //                 min_filter: wgpu::FilterMode::Linear,
-        //                 ..Default::default()
-        //             },
-        //         )),
-        //     }],
-        // });
-
-        // let filter_bg_nearest = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        //     label: Some("volume renderer bind group"),
-        //     layout: &Self::bind_group_layout(device),
-        //     entries: &[wgpu::BindGroupEntry {
-        //         binding: 0,
-        //         resource: wgpu::BindingResource::Sampler(&device.create_sampler(
-        //             &wgpu::SamplerDescriptor {
-        //                 label: Some("volume sampler"),
-        //                 mag_filter: wgpu::FilterMode::Nearest,
-        //                 min_filter: wgpu::FilterMode::Nearest,
-        //                 ..Default::default()
-        //             },
-        //         )),
-        //     }],
-        // });
+        let sampler_linear = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("volume sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let sampler_nearest = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("volume sampler"),
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
 
         let camera = UniformBuffer::new_default(device, Some("camera uniform buffer"));
         let settings = UniformBuffer::new_default(device, Some("render settings uniform buffer"));
@@ -103,10 +81,9 @@ impl VolumeRenderer {
         VolumeRenderer {
             pipeline,
             camera,
-            // filter_bg_nearest,
-            // filter_bg_linear,
+            sampler_nearest,
+            sampler_linear,
             bind_group: None,
-            filter_mode: wgpu::FilterMode::Linear,
             settings,
         }
     }
@@ -130,8 +107,6 @@ impl VolumeRenderer {
         self.settings.sync(queue);
         let step = ((volume.timesteps - 1) as f32 * render_settings.time) as usize;
 
-        self.filter_mode = render_settings.spatial_filter;
-
         self.bind_group = Some(
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("volume renderer bind group"),
@@ -153,14 +128,13 @@ impl VolumeRenderer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&device.create_sampler(
-                            &wgpu::SamplerDescriptor {
-                                label: Some("volume sampler"),
-                                mag_filter: render_settings.spatial_filter,
-                                min_filter: render_settings.spatial_filter,
-                                ..Default::default()
+                        resource: wgpu::BindingResource::Sampler(
+                            if render_settings.spatial_filter == wgpu::FilterMode::Nearest {
+                                &self.sampler_nearest
+                            } else {
+                                &self.sampler_linear
                             },
-                        )),
+                        ),
                     },
                 ],
             }),
@@ -178,7 +152,6 @@ impl VolumeRenderer {
         render_pass.set_bind_group(3, &cmap.bindgroup, &[]);
         render_pass.set_pipeline(&self.pipeline);
 
-        // render_pass.draw_indirect(&self.draw_indirect, 0);
         render_pass.draw(0..4, 0..1);
     }
 
@@ -254,7 +227,7 @@ impl CameraUniform {
         self.proj_inv_matrix = proj_matrix.invert().unwrap();
     }
 
-    pub fn set_camera<P: Projection>(&mut self, camera: GenericCamera<P>) {
+    pub fn set_camera(&mut self, camera: GenericCamera<impl Projection>) {
         self.set_proj_mat(camera.proj_matrix());
         self.set_view_mat(camera.view_matrix());
     }
