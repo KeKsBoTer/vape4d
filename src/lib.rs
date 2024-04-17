@@ -379,9 +379,6 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(file: R, config
         web_sys::window()
             .and_then(|win| win.document())
             .and_then(|doc| {
-                doc.get_element_by_id("loading-display")
-                    .unwrap()
-                    .set_text_content(Some("Unpacking"));
                 doc.body()
             })
             .and_then(|body| {
@@ -399,16 +396,6 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(file: R, config
 
     let mut state = WindowContext::new(window, file, &config).await.unwrap();
 
-    #[cfg(target_arch = "wasm32")]
-    web_sys::window()
-        .and_then(|win| win.document())
-        .and_then(|doc| {
-            doc.get_element_by_id("spinner")
-                .unwrap()
-                .set_attribute("style", "display:none;")
-                .unwrap();
-            doc.body()
-        });
 
     let mut last = Instant::now();
 
@@ -493,7 +480,7 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(file: R, config
 #[wasm_bindgen]
 pub async fn run_wasm() {
     use std::io::Cursor;
-    #[cfg(debug_assertions)]
+    // #[cfg(debug_assertions)]
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     console_log::init().expect("could not initialize logger");
 
@@ -510,4 +497,3 @@ pub async fn run_wasm() {
         }
     }
 }
-
