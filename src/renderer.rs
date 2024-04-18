@@ -77,7 +77,7 @@ impl VolumeRenderer {
         }
     }
 
-    pub fn prepare<'a,P: Projection>(
+    pub fn prepare<'a, P: Projection>(
         &mut self,
         device: &wgpu::Device,
         volume: &Volume,
@@ -85,62 +85,67 @@ impl VolumeRenderer {
         render_settings: &RenderSettings,
         cmap: &'a ColorMap,
     ) -> PerFrameData<'a> {
-        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("camera buffer"),
             contents: bytemuck::bytes_of(&CameraUniform::from(camera)),
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
-
-        let settings_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+        let settings_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("settnigs buffer"),
-            contents: bytemuck::bytes_of(&RenderSettingsUniform::from_settings(&render_settings, volume)),
+            contents: bytemuck::bytes_of(&RenderSettingsUniform::from_settings(
+                &render_settings,
+                volume,
+            )),
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
         let step = ((volume.timesteps - 1) as f32 * render_settings.time) as usize;
-        let bind_group = 
-            device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("volume renderer bind group"),
-                layout: &Self::bind_group_layout(device),
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(
-                            &volume.textures[step]
-                                .create_view(&wgpu::TextureViewDescriptor::default()),
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(
-                            &volume.textures[(step + 1) % volume.timesteps as usize]
-                                .create_view(&wgpu::TextureViewDescriptor::default()),
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(
-                            if render_settings.spatial_filter == wgpu::FilterMode::Nearest {
-                                &self.sampler_nearest
-                            } else {
-                                &self.sampler_linear
-                            },
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource:wgpu::BindingResource::Buffer(camera_buffer.as_entire_buffer_binding()),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource:wgpu::BindingResource::Buffer(settings_buffer.as_entire_buffer_binding()),
-                    },
-                ],
-            });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("volume renderer bind group"),
+            layout: &Self::bind_group_layout(device),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(
+                        &volume.textures.as_ref().unwrap()[step]
+                            .create_view(&wgpu::TextureViewDescriptor::default()),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(
+                        &volume.textures.as_ref().unwrap()[(step + 1) % volume.timesteps as usize]
+                            .create_view(&wgpu::TextureViewDescriptor::default()),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(
+                        if render_settings.spatial_filter == wgpu::FilterMode::Nearest {
+                            &self.sampler_nearest
+                        } else {
+                            &self.sampler_linear
+                        },
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Buffer(
+                        camera_buffer.as_entire_buffer_binding(),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::Buffer(
+                        settings_buffer.as_entire_buffer_binding(),
+                    ),
+                },
+            ],
+        });
         PerFrameData {
             bind_group,
-            cmap_bind_group: &cmap.bindgroup,
+            cmap_bind_group: cmap.bindgroup.as_ref().unwrap(),
         }
     }
 
@@ -243,7 +248,6 @@ impl Default for CameraUniform {
 }
 
 impl CameraUniform {
-
     pub(crate) fn set_view_mat(&mut self, view_matrix: Matrix4<f32>) {
         self.view_matrix = view_matrix;
         self.view_inv_matrix = view_matrix.invert().unwrap();
@@ -260,7 +264,7 @@ impl CameraUniform {
     }
 }
 
-impl<P:Projection> From<&GenericCamera<P>> for CameraUniform {
+impl<P: Projection> From<&GenericCamera<P>> for CameraUniform {
     fn from(camera: &GenericCamera<P>) -> Self {
         let mut uniform = CameraUniform::default();
         uniform.set_camera(camera);

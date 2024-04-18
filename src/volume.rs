@@ -1,7 +1,7 @@
 use bytemuck::Zeroable;
 use cgmath::{BaseNum, EuclideanSpace, MetricSpace, Point3, Vector3};
 use half::f16;
-use npyz::npz::{self};
+use npyz::{npz, NpyFile};
 use num_traits::Float;
 use std::io::{Read, Seek};
 use wgpu::util::{DeviceExt, TextureDataOrder};
@@ -9,23 +9,26 @@ use wgpu::util::{DeviceExt, TextureDataOrder};
 pub struct Volume {
     pub timesteps: u32,
     pub resolution: Vector3<u32>,
-    pub textures: Vec<wgpu::Texture>,
     pub aabb: Aabb<f32>,
     pub min_value: f32,
     pub max_value: f32,
+    data: Vec<f16>,
+    pub textures: Option<Vec<wgpu::Texture>>,
 }
 
 impl Volume {
-    pub fn load_npz<'a, R>(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        reader: &'a mut R,
-    ) -> anyhow::Result<Self>
+    pub fn load_npy<'a, R>(reader: &'a mut R) -> anyhow::Result<Self>
     where
         R: Read + Seek,
     {
-        let mut npz_file = npz::NpzArchive::new(reader)?;
-        let array = npz_file.by_name("trj")?.unwrap();
+        let array = NpyFile::new(reader)?;
+        Self::read(array)
+    }
+
+    pub fn read<'a, R>(array: NpyFile<R>) -> anyhow::Result<Self>
+    where
+        R: Read,
+    {
         let timesteps = array.shape()[0] as u32;
         let resolution = [
             array.shape()[2] as u32,
@@ -45,41 +48,69 @@ impl Volume {
             .map(|x| f16::from_f32((x - min_value) / (max_value - min_value)))
             .collect();
 
-        let volumes: Vec<wgpu::Texture> = (0..timesteps)
-            .map(|i| {
-                device.create_texture_with_data(
-                    queue,
-                    &wgpu::TextureDescriptor {
-                        label: Some(format!("volume texture {}", i).as_str()),
-                        size: wgpu::Extent3d {
-                            width: resolution[2],
-                            height: resolution[1],
-                            depth_or_array_layers: resolution[0],
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D3,
-                        format: wgpu::TextureFormat::R16Float,
-                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                        view_formats: &[],
-                    },
-                    TextureDataOrder::LayerMajor,
-                    bytemuck::cast_slice(
-                        &data16[(i * resolution[0] * resolution[1] * resolution[2]) as usize
-                            ..((i + 1) * resolution[0] * resolution[1] * resolution[2]) as usize],
-                    ),
-                )
-            })
-            .collect();
-
         Ok(Self {
             timesteps,
             resolution: resolution.into(),
             aabb: Aabb::unit(),
             max_value,
             min_value,
-            textures: volumes,
+            data: data16,
+            textures: None,
         })
+    }
+
+    pub fn upload2gpu(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        self.textures = Some(
+            (0..self.timesteps)
+                .map(|i| {
+                    device.create_texture_with_data(
+                        queue,
+                        &wgpu::TextureDescriptor {
+                            label: Some(format!("volume texture {}", i).as_str()),
+                            size: wgpu::Extent3d {
+                                width: self.resolution[2],
+                                height: self.resolution[1],
+                                depth_or_array_layers: self.resolution[0],
+                            },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D3,
+                            format: wgpu::TextureFormat::R16Float,
+                            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                                | wgpu::TextureUsages::COPY_DST,
+                            view_formats: &[],
+                        },
+                        TextureDataOrder::LayerMajor,
+                        bytemuck::cast_slice(
+                            &self.data[(i
+                                * self.resolution[0]
+                                * self.resolution[1]
+                                * self.resolution[2])
+                                as usize
+                                ..((i + 1)
+                                    * self.resolution[0]
+                                    * self.resolution[1]
+                                    * self.resolution[2])
+                                    as usize],
+                        ),
+                    )
+                })
+                .collect(),
+        );
+    }
+
+    pub fn load_npz<'a, R>(reader: R) -> anyhow::Result<Self>
+    where
+        R: Read + Seek,
+    {
+        let mut reader = npz::NpzArchive::new(reader)?;
+        let arr_name = reader
+            .array_names()
+            .next()
+            .ok_or(anyhow::format_err!("no array present"))?
+            .to_string();
+        let array = reader.by_name(arr_name.as_str())?.unwrap();
+        Self::read(array)
     }
 }
 

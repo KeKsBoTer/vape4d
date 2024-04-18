@@ -1,6 +1,4 @@
-use std::{ collections::HashMap,  io::{BufReader, Cursor, Read, Seek}, sync::Arc
-};
-
+use std::sync::Arc;
 use camera::{ GenericCamera, PerspectiveCamera};
 use controller::CameraController;
 #[cfg(target_arch = "wasm32")]
@@ -10,20 +8,23 @@ use renderer::{RenderSettings, VolumeRenderer};
 use std::time::{Duration, Instant};
 use wgpu::Backends;
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsCast;
+
+
 use cgmath::{
     vec3, Deg, EuclideanSpace, InnerSpace,  Point3, Quaternion, Rotation, Vector2, Vector3
 };
-use egui::{ Color32, TextureId};
+use egui::{ahash::HashMap, Color32};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;
 use winit::{
-    dpi::PhysicalSize,
-    event::{DeviceEvent, ElementState, Event, WindowEvent},
-    event_loop::EventLoop,
-    keyboard::PhysicalKey,
-    window::{Window, WindowBuilder},
+    dpi::PhysicalSize, event::{DeviceEvent, ElementState, Event, WindowEvent}, event_loop::EventLoop, keyboard::PhysicalKey, window::{Window, WindowBuilder}
 };
+
+#[cfg(target_arch = "wasm32")]
+use winit::platform::web::WindowBuilderExtWebSys;
 
 use crate::{
     camera::PerspectiveProjection,
@@ -100,21 +101,18 @@ pub struct WindowContext {
     renderer: VolumeRenderer,
 
     render_settings: RenderSettings,
-    cmaps: HashMap<String,(cmap::ColorMap,TextureId)>,
-    selected_cmap: String,
     cmap: cmap::ColorMap,
 
     playing:bool,
     animation_duration:Duration,
-
-    alpha_tf:Vec<Vector2<f32>>
 }
 
 impl WindowContext {
     // Creating some of the wgpu types requires async code
-    async fn new<R: Read + Seek>(
+    async fn new(
         window: Window,
-        pc_file: R,
+        volume: Volume,
+        cmap:ColorMap,
         render_config: &RenderConfig,
     ) -> anyhow::Result<Self> {
         let mut size = window.inner_size();
@@ -166,24 +164,7 @@ impl WindowContext {
 
         let mut ui_renderer = ui_renderer::EguiWGPU::new(device, surface_format, &window);
 
-        let mut buff_reader = BufReader::new(pc_file);
-        let volume = Volume::load_npz(device, queue, &mut buff_reader)?;
         let renderer = VolumeRenderer::new(device, surface_format);
-
-        let cmaps: HashMap<String,(ColorMap,TextureId)> = COLORMAP_DIR.files()
-            .filter_map(|f| {
-                let mut reader = Cursor::new(f.contents());
-                let name = f.path().file_stem().unwrap().to_str().unwrap().to_string();
-                let cmap = ColorMap::from_npz(device, queue, &mut reader).unwrap();
-                let egui_texture:TextureId = ui_renderer.renderer.register_native_texture(
-                    &device,
-                    &cmap.texture.create_view(&Default::default()),
-                    wgpu::FilterMode::Linear,
-                );
-                Some((name.clone(),(cmap, egui_texture)))
-            })
-            .collect();
-    
         
 
         let render_settings = RenderSettings {
@@ -211,21 +192,14 @@ impl WindowContext {
             ),
         );
 
-        // let camera = GenericCamera::new(
-        //     volume.aabb.center()-vec3(0., 0., 3.),
-        //     Quaternion::one(),
-        //     OrthographicProjection::new(
-        //         Vector2::new(size.width, size.height)/300,
-        //         1000.,
-        //         -1000.,
-        //     ),
-        // );
-        let selected_cmap = "magma";
-        let cmap = cmaps[selected_cmap].0.clone(device, queue);
-
         let animation_duration =Duration::from_secs_f32(volume.timesteps as f32*0.05);
+        
+        let mut volume = volume;
+        volume.upload2gpu(device, queue);
 
-
+        let mut cmap = cmap;
+        cmap.upload2gpu(device, queue);
+        
         Ok(Self {
             wgpu_context,
             scale_factor: window.scale_factor() as f32,
@@ -241,12 +215,9 @@ impl WindowContext {
             volume,
             renderer,
             render_settings,
-            cmaps,
             cmap,
             animation_duration,
             playing: true,
-            alpha_tf:vec![Vector2::new(0.,0.),Vector2::new(1.,1.)],
-            selected_cmap:selected_cmap.to_string()
         })
     }
 
@@ -354,47 +325,21 @@ impl WindowContext {
 }
 
 
-pub fn smoothstep(x: f32) -> f32 {
-    return x * x * (3.0 - 2.0 * x);
-}
 
-pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(file: R, config: RenderConfig) {
+pub async fn open_window(window_builder:WindowBuilder,volume: Volume,cmap: ColorMap,canvas_id:String, config: RenderConfig,cmaps:Option<HashMap<String,ColorMap>>) {
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
     let event_loop = EventLoop::new().unwrap();
 
 
-    let window_size = PhysicalSize::new(800, 600);
+    let version = env!("CARGO_PKG_VERSION");
+    let name = env!("CARGO_PKG_NAME");
 
-    let window = WindowBuilder::new()
-        .with_title("web-splats")
-        .with_inner_size(window_size)
+    let window = window_builder
+        .with_title(format!("{name} {version}"))
         .build(&event_loop)
         .unwrap();
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        use winit::platform::web::WindowExtWebSys;
-        // On wasm, append the canvas to the document body
-        web_sys::window()
-            .and_then(|win| win.document())
-            .and_then(|doc| {
-                doc.body()
-            })
-            .and_then(|body| {
-                let canvas = window.canvas().unwrap();
-                canvas.set_id("window-canvas");
-                canvas.set_width(body.client_width() as u32);
-                canvas.set_height(body.client_height() as u32);
-                let elm = web_sys::Element::from(canvas);
-                elm.set_attribute("style", "width: 100%; height: 100%;")
-                    .unwrap();
-                body.append_child(&elm).ok()
-            })
-            .expect("couldn't append canvas to document body");
-    }
-
-    let mut state = WindowContext::new(window, file, &config).await.unwrap();
+    let mut state = WindowContext::new(window, volume, cmap,&config).await.unwrap();
 
 
     let mut last = Instant::now();
@@ -476,24 +421,35 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(file: R, config
 }
 
 
+
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub async fn run_wasm() {
+pub async fn run_wasm(npz_file:Vec<u8>,colormap:Vec<u8>,canvas_id:String) {
     use std::io::Cursor;
     // #[cfg(debug_assertions)]
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     console_log::init().expect("could not initialize logger");
+    let reader = Cursor::new(npz_file);
+    let volume = Volume::load_npz(reader).unwrap();
+    
+    let reader_colormap = Cursor::new(colormap);
+    let cmap = ColorMap::from_npy(reader_colormap).unwrap();
 
-    loop {
-        if let Some(reader) = rfd::AsyncFileDialog::new().set_title("Select npz file").pick_file().await {
-            let reader = Cursor::new(reader.read().await);
-            wasm_bindgen_futures::spawn_local(open_window(
-                reader,
-                RenderConfig {
-                    no_vsync: false,
-                },
-            ));
-            break;
-        }
-    }
+    let canvas = web_sys::window()
+    .and_then(|win| win.document())
+    .and_then(|doc| {
+        doc.get_element_by_id(&canvas_id).unwrap().dyn_into::<web_sys::HtmlCanvasElement>().ok()
+    });
+    let window_builder = WindowBuilder::new().with_canvas(canvas);
+
+    wasm_bindgen_futures::spawn_local(open_window(
+        window_builder,
+        volume,
+        cmap,
+        canvas_id,
+        RenderConfig {
+            no_vsync: false,
+        },
+        None,
+    ));
 }

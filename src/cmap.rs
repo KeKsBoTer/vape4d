@@ -7,19 +7,26 @@ use wgpu::{util::DeviceExt, Extent3d};
 #[derive(Debug)]
 pub struct ColorMap {
     pub values: Vec<Vector4<u8>>,
-    pub texture: wgpu::Texture,
-    pub bindgroup: wgpu::BindGroup,
+    pub texture: Option<wgpu::Texture>,
+    pub bindgroup: Option<wgpu::BindGroup>,
 }
 
 impl ColorMap {
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, values: Vec<Vector4<u8>>) -> Self {
-        let n = values.len();
-        let texture = device.create_texture_with_data(
+    pub fn new(values: Vec<Vector4<u8>>) -> Self {
+        Self {
+            texture: None,
+            bindgroup: None,
+            values,
+        }
+    }
+
+    pub fn upload2gpu(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        self.texture = Some(device.create_texture_with_data(
             queue,
             &wgpu::TextureDescriptor {
                 label: Some("cmap texture"),
                 size: Extent3d {
-                    width: n as u32,
+                    width: self.values.len() as u32,
                     height: 1,
                     depth_or_array_layers: 1,
                 },
@@ -31,8 +38,8 @@ impl ColorMap {
                 view_formats: &[],
             },
             wgpu::util::TextureDataOrder::LayerMajor,
-            bytemuck::cast_slice(&values),
-        );
+            bytemuck::cast_slice(&self.values),
+        ));
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("cmap sampler"),
@@ -41,34 +48,31 @@ impl ColorMap {
             ..Default::default()
         });
 
-        let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("cmap bind group"),
-            layout: &Self::bind_group_layout(device),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(
-                        &texture.create_view(&wgpu::TextureViewDescriptor::default()),
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
-        });
-        Self {
-            texture,
-            bindgroup,
-            values,
-        }
+        self.bindgroup = Some(
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("cmap bind group"),
+                layout: &Self::bind_group_layout(device),
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(
+                            &self
+                                .texture
+                                .as_ref()
+                                .unwrap()
+                                .create_view(&wgpu::TextureViewDescriptor::default()),
+                        ),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            }),
+        );
     }
 
-    pub fn from_npz<'a, R>(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        reader: &'a mut R,
-    ) -> anyhow::Result<Self>
+    pub fn from_npy<'a, R>(reader: R) -> anyhow::Result<Self>
     where
         R: Read + Seek,
     {
@@ -85,7 +89,7 @@ impl ColorMap {
                 )
             })
             .collect();
-        Ok(Self::new(device, queue, values))
+        Ok(Self::new(values))
     }
 
     pub(crate) fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -110,10 +114,6 @@ impl ColorMap {
                 },
             ],
         })
-    }
-
-    pub fn clone(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
-        Self::new(device, queue, self.values.clone())
     }
 }
 

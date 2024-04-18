@@ -102,7 +102,6 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         .clamp_range((1e-4)..=(100000.)),
                 );
                 ui.end_row();
-
             });
     });
 
@@ -165,11 +164,10 @@ pub(crate) fn ui(state: &mut WindowContext) {
         .zip(alpha_values)
         .map(|(v, a)| Vector4::new(v[0], v[1], v[2], a))
         .collect();
-    state.cmap = ColorMap::new(
-        &state.wgpu_context.device,
-        &state.wgpu_context.queue,
-        new_cmap,
-    );
+    state.cmap = ColorMap::new(new_cmap);
+    state
+        .cmap
+        .upload2gpu(&state.wgpu_context.device, &state.wgpu_context.queue);
 
     egui::Window::new("Volume Info").show(ctx, |ui| {
         egui::Grid::new("volume_info")
@@ -186,7 +184,6 @@ pub(crate) fn ui(state: &mut WindowContext) {
             });
     });
 }
-
 
 use cgmath::{Vector2, Vector4};
 use egui::{epaint::PathShape, *};
