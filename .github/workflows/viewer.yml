@@ -41,6 +41,7 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
+      - name: Generate Colormaps
         run: |
           pip install matplotlib numpy
           python colormaps.py
