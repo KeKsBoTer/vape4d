@@ -4,6 +4,7 @@ use controller::CameraController;
 #[cfg(target_arch = "wasm32")]
 use instant::{Duration, Instant};
 use renderer::{RenderSettings, VolumeRenderer};
+use volume::VolumeGPU;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
 use wgpu::Backends;
@@ -15,12 +16,12 @@ use wasm_bindgen::JsCast;
 use cgmath::{
     vec3, Deg, EuclideanSpace, InnerSpace,  Point3, Quaternion, Rotation, Vector2, Vector3
 };
-use egui::{ahash::HashMap, Color32};
+use egui::Color32;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;
 use winit::{
-    dpi::PhysicalSize, event::{DeviceEvent, ElementState, Event, WindowEvent}, event_loop::EventLoop, keyboard::PhysicalKey, window::{Window, WindowBuilder}
+    dpi::PhysicalSize, event::{DeviceEvent, ElementState, Event, WindowEvent}, event_loop::EventLoop, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowBuilder}
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -28,21 +29,17 @@ use winit::platform::web::WindowBuilderExtWebSys;
 
 use crate::{
     camera::PerspectiveProjection,
-    cmap::ColorMap,
+    cmap::{ColorMap, ColorMapGPU},
     volume::{Aabb, Volume},
 };
-use include_dir::{include_dir, Dir};
-
-static COLORMAP_DIR: Dir = include_dir!("colormaps");
 
 mod camera;
-mod cmap;
+pub mod cmap;
 mod controller;
 mod renderer;
 mod ui;
 mod ui_renderer;
-mod uniform;
-mod volume;
+pub mod volume;
 
 pub struct RenderConfig {
     pub no_vsync: bool,
@@ -97,29 +94,29 @@ pub struct WindowContext {
 
     background_color: egui::Color32,
 
-    volume: Volume,
+    volumes: Vec<VolumeGPU>,
     renderer: VolumeRenderer,
 
     render_settings: RenderSettings,
-    cmap: cmap::ColorMap,
+    cmap: cmap::ColorMapGPU,
 
     playing:bool,
     animation_duration:Duration,
+    num_columns:u32
 }
 
 impl WindowContext {
     // Creating some of the wgpu types requires async code
     async fn new(
         window: Window,
-        volume: Volume,
+        volumes: Vec<Volume>,
         cmap:ColorMap,
         render_config: &RenderConfig,
     ) -> anyhow::Result<Self> {
         let mut size = window.inner_size();
-        if size == PhysicalSize::new(0, 0) {
+        if size.width == 0 || size.height == 0 {
             size = PhysicalSize::new(800, 600);
         }
-
         let window = Arc::new(window);
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor{
@@ -134,6 +131,9 @@ impl WindowContext {
 
         let device = &wgpu_context.device;
         let queue = &wgpu_context.queue;
+
+        let max_size = device.limits().max_texture_dimension_2d;
+        window.set_max_inner_size(Some(PhysicalSize::new(max_size,max_size)));
 
         let surface_caps = surface.get_capabilities(&wgpu_context.adapter);
 
@@ -162,10 +162,9 @@ impl WindowContext {
         };
         surface.configure(&device, &config);
 
-        let mut ui_renderer = ui_renderer::EguiWGPU::new(device, surface_format, &window);
+        let ui_renderer = ui_renderer::EguiWGPU::new(device, surface_format, &window);
 
         let renderer = VolumeRenderer::new(device, surface_format);
-        
 
         let render_settings = RenderSettings {
             clipping_aabb: Aabb::unit(),
@@ -174,11 +173,13 @@ impl WindowContext {
             spatial_filter: wgpu::FilterMode::Linear,
             temporal_filter: wgpu::FilterMode::Linear,
             distance_scale: 1.,
+            vmin:volumes[0].min_value,
+            vmax:volumes[0].max_value,
         };
 
         let mut controller = CameraController::new(0.1, 0.05);
-        controller.center = volume.aabb.center();
-        let r = volume.aabb.radius();
+        controller.center = volumes[0].aabb.center();
+        let r = volumes[0].aabb.radius();
         let corner = vec3(1., -1., 1.);
         let view_dir = Quaternion::look_at(-corner, Vector3::unit_y());
         let camera = PerspectiveCamera::new(
@@ -192,15 +193,13 @@ impl WindowContext {
             ),
         );
 
-        let animation_duration =Duration::from_secs_f32(volume.timesteps as f32*0.05);
+        let animation_duration = Duration::from_secs_f32(volumes[0].timesteps as f32*0.05);
         
-        let mut volume = volume;
-        volume.upload2gpu(device, queue);
+        let num_columns =  volumes.len().min(4) as u32;
+        let volumes_gpu = volumes.into_iter().map(|v| VolumeGPU::new(device, queue, v)).collect();
 
-        let mut cmap = cmap;
-        cmap.upload2gpu(device, queue);
-        
-        Ok(Self {
+        let cmap = ColorMapGPU::new(cmap, device, queue);
+        Ok(Self {   
             wgpu_context,
             scale_factor: window.scale_factor() as f32,
             window,
@@ -212,20 +211,23 @@ impl WindowContext {
             background_color: Color32::BLACK,
             camera,
 
-            volume,
+            volumes:volumes_gpu,
             renderer,
             render_settings,
             cmap,
             animation_duration,
             playing: true,
+            num_columns
         })
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>, scale_factor: Option<f32>) {
         if new_size.width > 0 && new_size.height > 0 {
-            self.config.width = new_size.width;
-            self.config.height = new_size.height;
-            self.camera.projection.resize(new_size.width, new_size.height);
+            let new_width = new_size.width;
+            let new_height = new_size.height;
+            self.config.width = new_width;
+            self.config.height = new_height;
+            self.camera.projection.resize(new_width, new_height);
             self.surface
                 .configure(&self.wgpu_context.device, &self.config);
         }
@@ -239,7 +241,7 @@ impl WindowContext {
     fn update(&mut self, dt: Duration) {
         self.controller.update_camera(&mut self.camera, dt);
         
-        if self.playing {
+        if self.playing && self.volumes[0].volume.timesteps > 1{
             self.render_settings.time += dt.as_secs_f32() / self.animation_duration.as_secs_f32();
             self.render_settings.time = self.render_settings.time.fract();
         }
@@ -265,13 +267,24 @@ impl WindowContext {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("render command encoder"),
                 });
-        let frame_data = self.renderer.prepare(
-            &self.wgpu_context.device,
-            &self.volume,
-            &self.camera,
-            &self.render_settings,
-            &self.cmap
-        );
+        let mut frame_data = Vec::new();
+
+        let columns = self.num_columns as usize;
+        let rows = (self.volumes.len() as f32 / columns as f32).ceil() as usize;
+        let cell_width = self.config.width as f32 / columns as f32;
+        let cell_height = self.config.height as f32 / rows as f32;
+
+        for v in &self.volumes{
+            let mut camera = self.camera.clone();
+            camera.projection.resize(cell_width as u32, cell_height as u32);
+            frame_data.push(self.renderer.prepare(
+                &self.wgpu_context.device,
+                &v,
+                &camera,
+                &self.render_settings,
+                &self.cmap
+            ));
+        }
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -291,8 +304,18 @@ impl WindowContext {
                 })],
                 ..Default::default()
             });
-            self.renderer
-                .render(&mut render_pass,  &frame_data);
+            for (i,v) in frame_data.iter().enumerate(){
+                let column = i % columns;
+                let row = i / columns;
+                render_pass.set_viewport(
+                    column as f32 * cell_width, 
+                    row as f32 * cell_height,
+                     cell_width,
+                     cell_height, 
+                     0., 1.);
+                self.renderer
+                    .render(&mut render_pass,  &v);
+            }
         }
 
         self.wgpu_context
@@ -326,7 +349,7 @@ impl WindowContext {
 
 
 
-pub async fn open_window(window_builder:WindowBuilder,volume: Volume,cmap: ColorMap,canvas_id:String, config: RenderConfig,cmaps:Option<HashMap<String,ColorMap>>) {
+pub async fn open_window(window_builder:WindowBuilder,volumes: Vec<Volume>,cmap: ColorMap,config: RenderConfig) {
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
     let event_loop = EventLoop::new().unwrap();
@@ -339,7 +362,7 @@ pub async fn open_window(window_builder:WindowBuilder,volume: Volume,cmap: Color
         .with_title(format!("{name} {version}"))
         .build(&event_loop)
         .unwrap();
-    let mut state = WindowContext::new(window, volume, cmap,&config).await.unwrap();
+    let mut state = WindowContext::new(window, volumes, cmap,&config).await.unwrap();
 
 
     let mut last = Instant::now();
@@ -366,9 +389,12 @@ pub async fn open_window(window_builder:WindowBuilder,volume: Volume,cmap: Color
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(key) = event.physical_key{
-                state
-                    .controller
-                    .process_keyboard(key, event.state == ElementState::Pressed);
+                    state
+                        .controller
+                        .process_keyboard(key, event.state == ElementState::Pressed);
+                    if key == KeyCode::KeyU && event.state == ElementState::Released{
+                        state.ui_visible = !state.ui_visible;
+                    }
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => match delta {
@@ -424,13 +450,13 @@ pub async fn open_window(window_builder:WindowBuilder,volume: Volume,cmap: Color
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub async fn run_wasm(npz_file:Vec<u8>,colormap:Vec<u8>,canvas_id:String) {
+pub async fn viewer_inline(npz_file:Vec<u8>,colormap:Vec<u8>,canvas_id:String) {
     use std::io::Cursor;
-    // #[cfg(debug_assertions)]
+    #[cfg(debug_assertions)]
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     console_log::init().expect("could not initialize logger");
     let reader = Cursor::new(npz_file);
-    let volume = Volume::load_npz(reader).unwrap();
+    let volumes = Volume::load_npz(reader,true).expect("Failed to load volumes");
     
     let reader_colormap = Cursor::new(colormap);
     let cmap = ColorMap::from_npy(reader_colormap).unwrap();
@@ -444,12 +470,57 @@ pub async fn run_wasm(npz_file:Vec<u8>,colormap:Vec<u8>,canvas_id:String) {
 
     wasm_bindgen_futures::spawn_local(open_window(
         window_builder,
-        volume,
+        volumes,
         cmap,
-        canvas_id,
         RenderConfig {
             no_vsync: false,
         },
-        None,
     ));
+}
+
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub async fn viewer_wasm(canvas_id:String) {
+    use std::io::Cursor;
+
+    use web_sys::{HtmlCanvasElement, HtmlElement};
+    #[cfg(debug_assertions)]
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+    console_log::init().expect("could not initialize logger");
+   
+    
+    let cmap = cmap::COLORMAPS.get("viridis").unwrap().clone();
+
+    let (canvas,spinner):(HtmlCanvasElement,HtmlElement) = web_sys::window()
+    .and_then(|win| win.document())
+    .and_then(|doc| {
+        let canvas = doc.get_element_by_id(&canvas_id).unwrap().dyn_into::<web_sys::HtmlCanvasElement>().unwrap();
+        let spinner = doc.get_element_by_id("spinner").unwrap().dyn_into::<web_sys::HtmlElement>().unwrap();
+        Some((canvas,spinner))
+    }).unwrap();
+    let size = (canvas.width() as u32,canvas.height() as u32);
+    let window_builder = WindowBuilder::new().with_canvas(Some(canvas)).with_inner_size(PhysicalSize::new(size.0, size.1));
+
+    loop {
+        if let Some(reader) = rfd::AsyncFileDialog::new().set_title("Select npz file").pick_file().await {
+
+            spinner.set_attribute("style", "display:flex;")
+            .unwrap();
+            let reader_v = Cursor::new(reader.read().await);
+            let volumes = Volume::load_npz(reader_v,true).expect("Failed to load volumes");
+
+            spinner.set_attribute("style", "display:none;")
+            .unwrap();
+            wasm_bindgen_futures::spawn_local(open_window(
+                window_builder,
+                volumes,
+                cmap,
+                RenderConfig {
+                    no_vsync: false,
+                },
+            ));
+            break;
+        }
+    }
 }

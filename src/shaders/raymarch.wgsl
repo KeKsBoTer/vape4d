@@ -19,6 +19,8 @@ struct Settings {
     step_size: f32,
     temporal_filter: u32,
     distance_scale: f32,
+    vmin:f32,
+    vmax:f32,
 }
 
 
@@ -124,6 +126,11 @@ fn sample_volume(pos: vec3<f32>) -> f32 {
     }
 }
 
+fn sample_cmap(value:f32)->vec4<f32>{
+    let value_n = (value-settings.vmin)/(settings.vmax-settings.vmin);
+    return textureSampleLevel(cmap, cmap_sampler, vec2<f32>(value_n, 0.5), 0.);
+}
+
 
 // traces ray trough volume and returns color
 fn trace_ray(ray_in: Ray) -> vec4<f32> {
@@ -162,7 +169,7 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
         let step_size = sample_pos.w;
 
         let sample = sample_volume(sample_pos.xyz);
-        let color_tf = textureSampleLevel(cmap, cmap_sampler, vec2<f32>(sample, 0.5), 0.);
+        let color_tf = sample_cmap(sample);
         let sigma = color_tf.a;
 
         if sigma > 0. {

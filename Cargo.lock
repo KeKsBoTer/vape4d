@@ -3311,6 +3311,7 @@ dependencies = [
  "log",
  "npyz",
  "num-traits",
+ "once_cell",
  "pollster",
  "rfd",
  "wasm-bindgen",

@@ -32,6 +32,7 @@ impl Default for PerspectiveCamera {
             rotation: Quaternion::new(1., 0., 0., 0.),
             projection: PerspectiveProjection {
                 fovy: Deg(45.).into(),
+                fovx: Deg(45.).into(),
                 znear: 0.1,
                 zfar: 100.,
                 aspect_ratio: 1.0,
@@ -43,6 +44,7 @@ impl Default for PerspectiveCamera {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PerspectiveProjection {
     pub fovy: Rad<f32>,
+    pub fovx: Rad<f32>,
     pub znear: f32,
     pub zfar: f32,
     pub aspect_ratio: f32,
@@ -53,7 +55,7 @@ impl Projection for PerspectiveProjection {
         build_proj(
             self.znear,
             self.zfar,
-            self.fovy * self.aspect_ratio,
+            self.fovx,
             self.fovy,
         )
     }
@@ -70,8 +72,10 @@ pub const VIEWPORT_Y_FLIP: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
 impl PerspectiveProjection {
     pub fn new<F: Into<Rad<f32>>>(viewport: Vector2<u32>, fovy: F, znear: f32, zfar: f32) -> Self {
         let vr = viewport.x as f32 / viewport.y as f32;
+        let fovyr = fovy.into();
         Self {
-            fovy: fovy.into(),
+            fovy: fovyr,
+            fovx: fovyr*vr,
             znear,
             zfar,
             aspect_ratio: vr,
@@ -80,7 +84,11 @@ impl PerspectiveProjection {
 
     pub fn resize(&mut self, width: u32, height: u32) {
         let ratio = width as f32 / height as f32;
-        self.fovy = self.fovy * self.aspect_ratio / ratio;
+        if width > height {
+            self.fovy = self.fovx / ratio;
+        } else {
+            self.fovx = self.fovy * ratio;
+        }
         self.aspect_ratio = ratio;
     }
 }

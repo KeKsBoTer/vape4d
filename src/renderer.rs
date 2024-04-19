@@ -1,7 +1,7 @@
 use crate::{
     camera::{GenericCamera, Projection, VIEWPORT_Y_FLIP},
-    cmap::ColorMap,
-    volume::{Aabb, Volume},
+    cmap::ColorMapGPU,
+    volume::{Aabb, Volume, VolumeGPU},
 };
 
 use cgmath::{EuclideanSpace, Matrix4, SquareMatrix, Vector4, Zero};
@@ -19,7 +19,7 @@ impl VolumeRenderer {
             label: Some("render pipeline layout"),
             bind_group_layouts: &[
                 &Self::bind_group_layout(device),
-                &ColorMap::bind_group_layout(device),
+                &ColorMapGPU::bind_group_layout(device),
             ],
             push_constant_ranges: &[],
         });
@@ -80,10 +80,10 @@ impl VolumeRenderer {
     pub fn prepare<'a, P: Projection>(
         &mut self,
         device: &wgpu::Device,
-        volume: &Volume,
+        volume: &VolumeGPU,
         camera: &GenericCamera<P>,
         render_settings: &RenderSettings,
-        cmap: &'a ColorMap,
+        cmap: &'a ColorMapGPU,
     ) -> PerFrameData<'a> {
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("camera buffer"),
@@ -95,12 +95,12 @@ impl VolumeRenderer {
             label: Some("settnigs buffer"),
             contents: bytemuck::bytes_of(&RenderSettingsUniform::from_settings(
                 &render_settings,
-                volume,
+                &volume.volume,
             )),
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
-        let step = ((volume.timesteps - 1) as f32 * render_settings.time) as usize;
+        let step = ((volume.volume.timesteps - 1) as f32 * render_settings.time) as usize;
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("volume renderer bind group"),
             layout: &Self::bind_group_layout(device),
@@ -108,14 +108,14 @@ impl VolumeRenderer {
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(
-                        &volume.textures.as_ref().unwrap()[step]
+                        &volume.textures[step]
                             .create_view(&wgpu::TextureViewDescriptor::default()),
                     ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::TextureView(
-                        &volume.textures.as_ref().unwrap()[(step + 1) % volume.timesteps as usize]
+                        &volume.textures[(step + 1) % volume.volume.timesteps as usize]
                             .create_view(&wgpu::TextureViewDescriptor::default()),
                     ),
                 },
@@ -145,7 +145,7 @@ impl VolumeRenderer {
         });
         PerFrameData {
             bind_group,
-            cmap_bind_group: cmap.bindgroup.as_ref().unwrap(),
+            cmap_bind_group: cmap.bindgroup(),
         }
     }
 
@@ -280,6 +280,8 @@ pub struct RenderSettings {
     pub spatial_filter: wgpu::FilterMode,
     pub temporal_filter: wgpu::FilterMode,
     pub distance_scale: f32,
+    pub vmin:f32,
+    pub vmax:f32,
 }
 
 #[repr(C)]
@@ -294,7 +296,9 @@ pub struct RenderSettingsUniform {
     step_size: f32,
     temporal_filter: u32,
     distance_scale: f32,
-    _pad: [u32; 3],
+    vmin:f32,
+    vmax:f32,
+    _pad: [u32; 1],
 }
 
 impl RenderSettingsUniform {
@@ -311,7 +315,9 @@ impl RenderSettingsUniform {
             step_size: settings.step_size,
             temporal_filter: settings.temporal_filter as u32,
             distance_scale: settings.distance_scale,
-            _pad: [0; 3],
+            vmin:settings.vmin,
+            vmax:settings.vmax,
+            _pad: [0; 1],
         }
     }
 }
@@ -328,7 +334,9 @@ impl Default for RenderSettingsUniform {
             step_size: 0.01,
             temporal_filter: wgpu::FilterMode::Nearest as u32,
             distance_scale: 1.,
-            _pad: [0; 3],
+            vmin:0.,
+            vmax:1.,
+            _pad: [0; 1],
         }
     }
 }
