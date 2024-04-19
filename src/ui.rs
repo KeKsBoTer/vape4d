@@ -6,7 +6,7 @@ use egui_plot::{Plot, PlotImage, PlotPoint};
 
 use crate::{
     cmap::{ rasterize_tf, ColorMap, COLORMAPS},
-    volume, WindowContext,
+     WindowContext,
 };
 
 pub(crate) fn ui(state: &mut WindowContext) {

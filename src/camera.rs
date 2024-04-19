@@ -135,6 +135,7 @@ pub struct OrthographicProjection {
 }
 
 impl OrthographicProjection {
+    #[allow(unused)]
     pub fn new(viewport: Vector2<u32>, znear: f32, zfar: f32) -> Self {
         let vr = viewport.x as f32 / viewport.y as f32;
         Self {
@@ -145,6 +146,7 @@ impl OrthographicProjection {
         }
     }
 
+    #[allow(unused)]
     pub fn resize(&mut self, width: u32, height: u32) {
         let ratio = width as f32 / height as f32;
         self.aspect_ratio = ratio;
