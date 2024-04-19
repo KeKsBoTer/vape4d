@@ -42,7 +42,9 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
       - name: Generate Colormaps
-        run: python colormaps.py
+        run: |
+          pip install -r requirements.txt
+          python colormaps.py
       - name: Build
         run: |
           cargo install wasm-bindgen-cli
