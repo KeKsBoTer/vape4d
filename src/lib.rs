@@ -102,7 +102,8 @@ pub struct WindowContext {
 
     playing:bool,
     animation_duration:Duration,
-    num_columns:u32
+    num_columns:u32,
+    selected_channel:Option<usize>,
 }
 
 impl WindowContext {
@@ -217,7 +218,8 @@ impl WindowContext {
             cmap,
             animation_duration,
             playing: true,
-            num_columns
+            num_columns,
+            selected_channel:None,
         })
     }
 
@@ -274,16 +276,27 @@ impl WindowContext {
         let cell_width = self.config.width as f32 / columns as f32;
         let cell_height = self.config.height as f32 / rows as f32;
 
-        for v in &self.volumes{
-            let mut camera = self.camera.clone();
-            camera.projection.resize(cell_width as u32, cell_height as u32);
+        if let Some(selected_channel) = self.selected_channel{
+            let camera = self.camera.clone();
             frame_data.push(self.renderer.prepare(
                 &self.wgpu_context.device,
-                &v,
+                &self.volumes[selected_channel],
                 &camera,
                 &self.render_settings,
                 &self.cmap
             ));
+        }else{
+            for v in &self.volumes{
+                let mut camera = self.camera.clone();
+                camera.projection.resize(cell_width as u32, cell_height as u32);
+                frame_data.push(self.renderer.prepare(
+                    &self.wgpu_context.device,
+                    &v,
+                    &camera,
+                    &self.render_settings,
+                    &self.cmap
+                ));
+            }
         }
 
         {
@@ -305,14 +318,16 @@ impl WindowContext {
                 ..Default::default()
             });
             for (i,v) in frame_data.iter().enumerate(){
-                let column = i % columns;
-                let row = i / columns;
-                render_pass.set_viewport(
-                    column as f32 * cell_width, 
-                    row as f32 * cell_height,
-                     cell_width,
-                     cell_height, 
-                     0., 1.);
+                if self.selected_channel.is_none(){
+                    let column = i % columns;
+                    let row = i / columns;
+                    render_pass.set_viewport(
+                        column as f32 * cell_width, 
+                        row as f32 * cell_height,
+                        cell_width,
+                        cell_height, 
+                        0., 1.);
+                }
                 self.renderer
                     .render(&mut render_pass,  &v);
             }
@@ -350,8 +365,6 @@ impl WindowContext {
 
 
 pub async fn open_window(window_builder:WindowBuilder,volumes: Vec<Volume>,cmap: ColorMap,config: RenderConfig) {
-    #[cfg(not(target_arch = "wasm32"))]
-    env_logger::init();
     let event_loop = EventLoop::new().unwrap();
 
 
@@ -456,7 +469,7 @@ pub async fn viewer_inline(npz_file:Vec<u8>,colormap:Vec<u8>,canvas_id:String) {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     console_log::init().expect("could not initialize logger");
     let reader = Cursor::new(npz_file);
-    let volumes = Volume::load_npz(reader,true).expect("Failed to load volumes");
+    let volumes = Volume::load_npy(reader,true).expect("Failed to load volumes");
     
     let reader_colormap = Cursor::new(colormap);
     let cmap = ColorMap::from_npy(reader_colormap).unwrap();
@@ -503,12 +516,14 @@ pub async fn viewer_wasm(canvas_id:String) {
     let window_builder = WindowBuilder::new().with_canvas(Some(canvas)).with_inner_size(PhysicalSize::new(size.0, size.1));
 
     loop {
-        if let Some(reader) = rfd::AsyncFileDialog::new().set_title("Select npz file").pick_file().await {
+        if let Some(reader) = rfd::AsyncFileDialog::new().set_title("Select npy file").add_filter("numpy file", &["npy","npz"]).pick_file().await {
 
             spinner.set_attribute("style", "display:flex;")
             .unwrap();
-            let reader_v = Cursor::new(reader.read().await);
-            let volumes = Volume::load_npz(reader_v,true).expect("Failed to load volumes");
+            let data = reader.read().await;
+            let is_npz = data.starts_with(b"\x50\x4B\x03\x04");
+            let reader_v = Cursor::new(data);
+            let volumes = if is_npz{Volume::load_npz(reader_v,true) }else{Volume::load_npy(reader_v,true)}.expect("Failed to load volumes");
 
             spinner.set_attribute("style", "display:none;")
             .unwrap();

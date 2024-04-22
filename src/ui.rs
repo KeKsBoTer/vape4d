@@ -3,10 +3,9 @@ use std::time::Duration;
 use egui::vec2;
 use egui_plot::{Plot, PlotImage, PlotPoint};
 
-
 use crate::{
-    cmap::{ rasterize_tf, ColorMap, COLORMAPS},
-     WindowContext,
+    cmap::{rasterize_tf, ColorMap, COLORMAPS},
+    WindowContext,
 };
 
 pub(crate) fn ui(state: &mut WindowContext) {
@@ -17,7 +16,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
             .num_columns(2)
             .striped(true)
             .show(ui, |ui| {
-                if with_animation{
+                if with_animation {
                     ui.label("Progress");
                     ui.add(
                         egui::Slider::new(&mut state.render_settings.time, (0.)..=(1.))
@@ -95,7 +94,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 ui.add(
                     egui::DragValue::new(&mut state.render_settings.step_size)
                         .speed(0.01)
-                        .clamp_range((1e-4)..=(1.)),
+                        .clamp_range((1e-3)..=(0.1)),
                 );
                 ui.end_row();
 
@@ -106,16 +105,35 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         .clamp_range((1e-4)..=(100000.)),
                 );
                 ui.end_row();
-                if state.volumes.len() > 1{
-
-                    ui.label("Number of Rows");
-                    let max_rows = state.volumes.len();
-                    ui.add(
-                        egui::DragValue::new(&mut state.num_columns)
-                            .speed(0.01)
-                            .clamp_range(1..=max_rows),
-                    );
+                if state.volumes.len() > 1 {
+                    ui.label("Channel");
+                    egui::ComboBox::new("selected_channel", "")
+                        .selected_text(
+                            state
+                                .selected_channel
+                                .map_or("All".to_string(), |v| v.to_string()),
+                        )
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut state.selected_channel, None, "All");
+                            for i in 0..state.volumes.len() {
+                                ui.selectable_value(
+                                    &mut state.selected_channel,
+                                    Some(i),
+                                    format!("{}", i),
+                                );
+                            }
+                        });
                     ui.end_row();
+                    if state.selected_channel.is_none() {
+                        ui.label("Number of Rows");
+                        let max_rows = state.volumes.len();
+                        ui.add(
+                            egui::DragValue::new(&mut state.num_columns)
+                                .speed(0.01)
+                                .clamp_range(1..=max_rows),
+                        );
+                        ui.end_row();
+                    }
                 }
             });
     });
@@ -125,20 +143,29 @@ pub(crate) fn ui(state: &mut WindowContext) {
     egui::Window::new("Transfer Function")
         .default_size(vec2(300., 50.))
         .show(ctx, |ui| {
-            ui.horizontal(|ui|{
+            ui.horizontal(|ui| {
                 ui.label("vmax");
-                ui.add(egui::DragValue::new(&mut state.render_settings.vmin).speed(0.01).clamp_range(state.volumes[0].volume.min_value..=state.render_settings.vmax));
+                ui.add(
+                    egui::DragValue::new(&mut state.render_settings.vmin)
+                        .speed(0.01)
+                        .clamp_range(
+                            state.volumes[0].volume.min_value..=state.render_settings.vmax,
+                        ),
+                );
                 ui.label("vmin");
-                ui.add(egui::DragValue::new(&mut state.render_settings.vmax).speed(0.01).clamp_range(state.render_settings.vmin..=state.volumes[0].volume.max_value));
+                ui.add(
+                    egui::DragValue::new(&mut state.render_settings.vmax)
+                        .speed(0.01)
+                        .clamp_range(
+                            state.render_settings.vmin..=state.volumes[0].volume.max_value,
+                        ),
+                );
             });
             ui.horizontal(|ui| {
                 let cmaps = &COLORMAPS;
                 let mut selected_cmap: String = ui.ctx().data_mut(|d| {
-                    d.get_persisted_mut_or(
-                        "selected_cmap".into(),
-                        "viridis".to_string(),
-                    )
-                    .clone()
+                    d.get_persisted_mut_or("selected_cmap".into(), "viridis".to_string())
+                        .clone()
                 });
                 ui.label("Colormap");
                 egui::ComboBox::new("cmap_select", "")
@@ -149,12 +176,10 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         for (name, cmap) in keys {
                             let texture = load_or_create(ui, cmap);
                             ui.horizontal(|ui| {
-                                ui.image(egui::ImageSource::Texture(
-                                    egui::load::SizedTexture {
-                                        id: texture,
-                                        size: vec2(50., 10.),
-                                    },
-                                ));
+                                ui.image(egui::ImageSource::Texture(egui::load::SizedTexture {
+                                    id: texture,
+                                    size: vec2(50., 10.),
+                                }));
                                 ui.selectable_value(&mut selected_cmap, name.clone(), name);
                             });
                         }
@@ -171,7 +196,9 @@ pub(crate) fn ui(state: &mut WindowContext) {
             );
         });
 
-    state.cmap.set_color_map(cmap,&state.wgpu_context.device,&state.wgpu_context.queue);
+    state
+        .cmap
+        .set_color_map(cmap, &state.wgpu_context.device, &state.wgpu_context.queue);
 
     egui::Window::new("Volume Info").show(ctx, |ui| {
         egui::Grid::new("volume_info")
@@ -189,7 +216,10 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 ui.label(format!("{}x{}x{} (WxDxH)", res.x, res.y, res.z));
                 ui.end_row();
                 ui.label("value range");
-                ui.label(format!("[{} , {}]", state.volumes[0].volume.min_value, state.volumes[0].volume.max_value));
+                ui.label(format!(
+                    "[{} , {}]",
+                    state.volumes[0].volume.min_value, state.volumes[0].volume.max_value
+                ));
                 ui.end_row();
             });
     });
@@ -289,7 +319,7 @@ impl ColorMapBuilder {
         }
     }
 
-    fn show(self, ui: &mut Ui, color_map: &mut ColorMap,vmin:f32,vmax:f32) {
+    fn show(self, ui: &mut Ui, color_map: &mut ColorMap, vmin: f32, vmax: f32) {
         let id = ui.make_persistent_id(self.id_source);
         let texture = load_or_create(ui, &color_map);
         let width = vmax - vmin;
@@ -332,7 +362,6 @@ impl ColorMapBuilder {
         ui.data_mut(|d: &mut util::IdTypeMap| {
             d.insert_persisted(id.with("alpha_tf"), alpha_tf);
         });
-
     }
 }
 
