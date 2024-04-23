@@ -521,7 +521,6 @@ pub async fn viewer_wasm(canvas_id:String) {
             spinner.set_attribute("style", "display:flex;")
             .unwrap();
             let data = reader.read().await;
-            let is_npz = data.starts_with(b"\x50\x4B\x03\x04");
             let reader_v = Cursor::new(data);
             let volumes = Volume::load_numpy(reader_v,true).expect("Failed to load volumes");
 
