@@ -469,7 +469,7 @@ pub async fn viewer_inline(npz_file:Vec<u8>,colormap:Vec<u8>,canvas_id:String) {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     console_log::init().expect("could not initialize logger");
     let reader = Cursor::new(npz_file);
-    let volumes = Volume::load_npy(reader,true).expect("Failed to load volumes");
+    let volumes = Volume::load_numpy(reader,true).expect("Failed to load volumes");
     
     let reader_colormap = Cursor::new(colormap);
     let cmap = ColorMap::from_npy(reader_colormap).unwrap();
@@ -523,7 +523,7 @@ pub async fn viewer_wasm(canvas_id:String) {
             let data = reader.read().await;
             let is_npz = data.starts_with(b"\x50\x4B\x03\x04");
             let reader_v = Cursor::new(data);
-            let volumes = if is_npz{Volume::load_npz(reader_v,true) }else{Volume::load_npy(reader_v,true)}.expect("Failed to load volumes");
+            let volumes = Volume::load_numpy(reader_v,true).expect("Failed to load volumes");
 
             spinner.set_attribute("style", "display:none;")
             .unwrap();

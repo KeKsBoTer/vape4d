@@ -116,10 +116,26 @@ impl Volume {
             d => anyhow::bail!("unsupported type {:}", d.descr()),
         }
     }
+    pub fn load_numpy<'a, R>(mut reader: R, time_first: bool) -> anyhow::Result<Vec<Self>>
+    where
+        R: Read + Seek {
+
+        let mut buffer = [0; 4];
+        reader.read_exact(&mut buffer)?;
+        reader.seek(std::io::SeekFrom::Current(-4))?;
+        let is_npz = buffer == *b"\x50\x4B\x03\x04";
+            
+        if is_npz{
+            Self::load_npz(reader, time_first)
+        } else {
+            Self::load_npy(reader, time_first)
+        }
+
+    }
 
     pub fn load_npz<'a, R>(reader: R, time_first: bool) -> anyhow::Result<Vec<Self>>
     where
-        R: Read + Seek,
+        R: Read + Seek ,
     {
         let mut reader = npz::NpzArchive::new(reader)?;
         let arr_name = reader
