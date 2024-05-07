@@ -62,6 +62,6 @@ crate-type = ["cdylib", "rlib"]
 name = "viewer"
 
 [profile.web-release]
-inherits = "dev"
-# opt-level = "s"
-# strip = "debuginfo"
+inherits = "release"
+opt-level = "s"
+strip = "debuginfo"
