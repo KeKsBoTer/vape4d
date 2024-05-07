@@ -76,11 +76,22 @@ impl Volume {
         if min_value == max_value {
             max_value = min_value + 1.0;
         }
+        let res_min = resolution.iter().min().unwrap();
+
+        let aabb = Aabb {
+            min: Point3::new(0.0, 0.0, 0.0),
+            max: Point3::new(
+                resolution[2] as f32 / *res_min as f32,
+                resolution[1] as f32 / *res_min as f32,
+                resolution[0] as f32 / *res_min as f32,
+            ),
+        };
+
         let results = (0..channels as usize)
             .map(|c| Self {
                 timesteps: timesteps as u32,
                 resolution: resolution.into(),
-                aabb: Aabb::unit(),
+                aabb,
                 max_value,
                 min_value,
                 data: volumes[c].clone(),
@@ -118,24 +129,23 @@ impl Volume {
     }
     pub fn load_numpy<'a, R>(mut reader: R, time_first: bool) -> anyhow::Result<Vec<Self>>
     where
-        R: Read + Seek {
-
+        R: Read + Seek,
+    {
         let mut buffer = [0; 4];
         reader.read_exact(&mut buffer)?;
         reader.seek(std::io::SeekFrom::Current(-4))?;
         let is_npz = buffer == *b"\x50\x4B\x03\x04";
-            
-        if is_npz{
+
+        if is_npz {
             Self::load_npz(reader, time_first)
         } else {
             Self::load_npy(reader, time_first)
         }
-
     }
 
     pub fn load_npz<'a, R>(reader: R, time_first: bool) -> anyhow::Result<Vec<Self>>
     where
-        R: Read + Seek ,
+        R: Read + Seek,
     {
         let mut reader = npz::NpzArchive::new(reader)?;
         let arr_name = reader
@@ -201,7 +211,7 @@ pub struct Aabb<F: Float + BaseNum> {
 impl<F: Float + BaseNum> Aabb<F> {
     pub fn unit() -> Self {
         Self {
-            min: Point3::new(-F::zero(), -F::zero(), -F::zero()),
+            min: Point3::new(F::zero(), F::zero(), F::zero()),
             max: Point3::new(F::one(), F::one(), F::one()),
         }
     }

@@ -1,12 +1,15 @@
 use std::time::Duration;
 
-use egui::vec2;
+use egui::{epaint::TextShape, vec2};
 use egui_plot::{Plot, PlotImage, PlotPoint};
 
 use crate::{
-    cmap::{rasterize_tf, ColorMap, COLORMAPS},
+    cmap::{rasterize_tf, ColorMap},
     WindowContext,
 };
+
+#[cfg(feature = "colormaps")]
+use crate::cmap::COLORMAPS;
 
 pub(crate) fn ui(state: &mut WindowContext) {
     let ctx = state.ui_renderer.winit.egui_ctx();
@@ -140,92 +143,157 @@ pub(crate) fn ui(state: &mut WindowContext) {
 
     let mut cmap = state.cmap.color_map().clone();
 
-    egui::Window::new("Transfer Function")
-        .default_size(vec2(300., 50.))
-        .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("vmax");
-                ui.add(
-                    egui::DragValue::new(&mut state.render_settings.vmin)
-                        .speed(0.01)
-                        .clamp_range(
-                            state.volumes[0].volume.min_value..=state.render_settings.vmax,
-                        ),
-                );
-                ui.label("vmin");
-                ui.add(
-                    egui::DragValue::new(&mut state.render_settings.vmax)
-                        .speed(0.01)
-                        .clamp_range(
-                            state.render_settings.vmin..=state.volumes[0].volume.max_value,
-                        ),
-                );
-            });
-            ui.horizontal(|ui| {
-                let cmaps = &COLORMAPS;
-                let mut selected_cmap: String = ui.ctx().data_mut(|d| {
-                    d.get_persisted_mut_or("selected_cmap".into(), "viridis".to_string())
-                        .clone()
+    if state.colormap_editor_visible {
+        egui::Window::new("Transfer Function")
+            .default_size(vec2(300., 50.))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("vmax");
+                    ui.add(
+                        egui::DragValue::new(&mut state.render_settings.vmin)
+                            .speed(0.01)
+                            .clamp_range(
+                                state.volumes[0].volume.min_value..=state.render_settings.vmax,
+                            ),
+                    );
+                    ui.label("vmin");
+                    ui.add(
+                        egui::DragValue::new(&mut state.render_settings.vmax)
+                            .speed(0.01)
+                            .clamp_range(
+                                state.render_settings.vmin..=state.volumes[0].volume.max_value,
+                            ),
+                    );
                 });
-                ui.label("Colormap");
-                egui::ComboBox::new("cmap_select", "")
-                    .selected_text(selected_cmap.clone())
-                    .show_ui(ui, |ui| {
-                        let mut keys: Vec<_> = cmaps.iter().collect();
-                        keys.sort_by_key(|e| e.0);
-                        for (name, cmap) in keys {
-                            let texture = load_or_create(ui, cmap);
-                            ui.horizontal(|ui| {
-                                ui.image(egui::ImageSource::Texture(egui::load::SizedTexture {
-                                    id: texture,
-                                    size: vec2(50., 10.),
-                                }));
-                                ui.selectable_value(&mut selected_cmap, name.clone(), name);
-                            });
-                        }
+                #[cfg(feature = "colormaps")]
+                ui.horizontal(|ui| {
+                    let cmaps = &COLORMAPS;
+                    let mut selected_cmap: String = ui.ctx().data_mut(|d| {
+                        d.get_persisted_mut_or("selected_cmap".into(), "viridis".to_string())
+                            .clone()
                     });
-                cmap = cmaps[&selected_cmap].clone();
-                ui.ctx()
-                    .data_mut(|d| d.insert_persisted("selected_cmap".into(), selected_cmap));
+                    ui.label("Colormap");
+                    egui::ComboBox::new("cmap_select", "")
+                        .selected_text(selected_cmap.clone())
+                        .show_ui(ui, |ui| {
+                            let mut keys: Vec<_> = cmaps.iter().collect();
+                            keys.sort_by_key(|e| e.0);
+                            for (name, cmap) in keys {
+                                let texture = load_or_create(ui, cmap);
+                                ui.horizontal(|ui| {
+                                    ui.image(egui::ImageSource::Texture(
+                                        egui::load::SizedTexture {
+                                            id: texture,
+                                            size: vec2(50., 10.),
+                                        },
+                                    ));
+                                    ui.selectable_value(&mut selected_cmap, name.clone(), name);
+                                });
+                            }
+                        });
+                    cmap = cmaps[&selected_cmap].clone();
+                    ui.ctx()
+                        .data_mut(|d| d.insert_persisted("selected_cmap".into(), selected_cmap));
+                });
+                ColorMapBuilder::new("cmap_builder").show(
+                    ui,
+                    &mut cmap,
+                    state.render_settings.vmin,
+                    state.render_settings.vmax,
+                );
             });
-            ColorMapBuilder::new("cmap_builder").show(
-                ui,
-                &mut cmap,
-                state.render_settings.vmin,
-                state.render_settings.vmax,
-            );
-        });
-
+    }
     state
         .cmap
         .set_color_map(cmap, &state.wgpu_context.device, &state.wgpu_context.queue);
 
-    egui::Window::new("Volume Info").show(ctx, |ui| {
-        egui::Grid::new("volume_info")
-            .num_columns(2)
-            .striped(true)
-            .show(ui, |ui| {
-                ui.label("timesteps");
-                ui.label(state.volumes[0].volume.timesteps.to_string());
-                ui.end_row();
-                ui.label("channels");
-                ui.label(state.volumes.len().to_string());
-                ui.end_row();
-                ui.label("resolution");
-                let res = state.volumes[0].volume.resolution;
-                ui.label(format!("{}x{}x{} (WxDxH)", res.x, res.y, res.z));
-                ui.end_row();
-                ui.label("value range");
-                ui.label(format!(
-                    "[{} , {}]",
-                    state.volumes[0].volume.min_value, state.volumes[0].volume.max_value
+    if state.volume_info_visible {
+        egui::Window::new("Volume Info").show(ctx, |ui| {
+            egui::Grid::new("volume_info")
+                .num_columns(2)
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.label("timesteps");
+                    ui.label(state.volumes[0].volume.timesteps.to_string());
+                    ui.end_row();
+                    ui.label("channels");
+                    ui.label(state.volumes.len().to_string());
+                    ui.end_row();
+                    ui.label("resolution");
+                    let res = state.volumes[0].volume.resolution;
+                    ui.label(format!("{}x{}x{} (WxDxH)", res.x, res.y, res.z));
+                    ui.end_row();
+                    ui.label("value range");
+                    ui.label(format!(
+                        "[{} , {}]",
+                        state.volumes[0].volume.min_value, state.volumes[0].volume.max_value
+                    ));
+                    ui.end_row();
+                });
+        });
+    }
+
+    let frame_rect = ctx.available_rect();
+    egui::Area::new(egui::Id::new("orientation"))
+        .fixed_pos(Pos2::new(frame_rect.left(), frame_rect.bottom()))
+        .anchor(Align2::LEFT_BOTTOM, Vec2::new(0., 0.))
+        .interactable(false)
+        .order(Order::Background)
+        .show(ctx, |ui| {
+            let (response, painter) = ui.allocate_painter(
+                vec2(100., 100.),
+                Sense {
+                    click: false,
+                    drag: false,
+                    focusable: false,
+                },
+            );
+
+            let to_screen = emath::RectTransform::from_to(
+                Rect::from_two_pos(Pos2::new(-1.2, -1.2), Pos2::new(1.2, 1.2)),
+                response.rect,
+            );
+            let x_color = Color32::RED;
+            let y_color = Color32::GREEN;
+            let z_color = Color32::BLUE;
+
+            let view_matrix = state.camera.view_matrix();
+            let x_axis = view_matrix.transform_vector(Vector3::unit_x());
+            // multiply with -1 because in egui origin is top left
+            let y_axis = -view_matrix.transform_vector(Vector3::unit_y());
+            let z_axis = view_matrix.transform_vector(Vector3::unit_z());
+            let origin = view_matrix.transform_vector(Vector3::zero());
+
+            let axes = [
+                (x_axis, x_color, "X"),
+                (y_axis, y_color, "Y"),
+                (z_axis, z_color, "Z"),
+            ];
+            let depth = vec![-x_axis.z, -y_axis.z, -z_axis.z];
+            let draw_order = argsort(&depth);
+            for i in draw_order.iter() {
+                let (axis, color, label) = axes[*i];
+                let pos = to_screen.transform_pos(pos2(axis.x, axis.y));
+                painter.add(PathShape::line(
+                    vec![to_screen.transform_pos(pos2(origin.x, origin.y)), pos],
+                    Stroke::new(3., color),
                 ));
-                ui.end_row();
-            });
-    });
+                painter.add(TextShape::new(
+                    pos,
+                    painter.layout_no_wrap(label.to_string(), FontId::default(), color),
+                    color,
+                ));
+            }
+        });
 }
 
-use cgmath::Vector2;
+pub fn argsort<T: PartialOrd>(data: &[T]) -> Vec<usize> {
+    let mut indices: Vec<usize> = (0..data.len()).collect::<Vec<_>>();
+    indices.sort_by(|&a, &b| data[a].partial_cmp(&data[b]).unwrap());
+    indices
+}
+
+use cgmath::{Transform, Vector2, Vector3, Zero};
 use egui::{epaint::PathShape, *};
 
 pub fn tf_ui(ui: &mut Ui, points: &mut Vec<Vector2<f32>>) -> egui::Response {

@@ -1,31 +1,30 @@
 use std::sync::Arc;
-use camera::{ GenericCamera, PerspectiveCamera};
+use camera::GenericCamera;
 use controller::CameraController;
-#[cfg(target_arch = "wasm32")]
-use instant::{Duration, Instant};
 use renderer::{RenderSettings, VolumeRenderer};
 use volume::VolumeGPU;
+
+#[cfg(target_arch = "wasm32")]
+use instant::{Duration, Instant};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
+
 use wgpu::Backends;
 
 #[cfg(target_arch = "wasm32")]
-use wasm_bindgen::JsCast;
+mod web;
+#[cfg(target_arch = "wasm32")]
+pub use web::*;
 
 
 use cgmath::{
     vec3, Deg, EuclideanSpace, InnerSpace,  Point3, Quaternion, Rotation, Vector2, Vector3
 };
-use egui::Color32;
+// use egui::Color32;
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::wasm_bindgen;
 use winit::{
     dpi::PhysicalSize, event::{DeviceEvent, ElementState, Event, WindowEvent}, event_loop::EventLoop, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowBuilder}
 };
-
-#[cfg(target_arch = "wasm32")]
-use winit::platform::web::WindowBuilderExtWebSys;
 
 use crate::{
     camera::PerspectiveProjection,
@@ -43,6 +42,9 @@ pub mod volume;
 
 pub struct RenderConfig {
     pub no_vsync: bool,
+    pub background_color: wgpu::Color,
+    pub show_colormap_editor:bool,
+    pub show_volume_info:bool,
 }
 
 pub struct WGPUContext {
@@ -92,7 +94,7 @@ pub struct WindowContext {
     ui_renderer: ui_renderer::EguiWGPU,
     ui_visible: bool,
 
-    background_color: egui::Color32,
+    background_color: wgpu::Color,
 
     volumes: Vec<VolumeGPU>,
     renderer: VolumeRenderer,
@@ -104,6 +106,9 @@ pub struct WindowContext {
     animation_duration:Duration,
     num_columns:u32,
     selected_channel:Option<usize>,
+
+    colormap_editor_visible:bool,
+    volume_info_visible:bool,
 }
 
 impl WindowContext {
@@ -183,7 +188,7 @@ impl WindowContext {
         let r = volumes[0].aabb.radius();
         let corner = vec3(1., -1., 1.);
         let view_dir = Quaternion::look_at(-corner, Vector3::unit_y());
-        let camera = PerspectiveCamera::new(
+        let camera = GenericCamera::new(
             Point3::from_vec(corner.normalize()) * r * 3.,
             view_dir,
             PerspectiveProjection::new(
@@ -192,6 +197,11 @@ impl WindowContext {
                 0.01,
                 1000.,
             ),
+            // OrthographicProjection::new(
+            //     Vector2::new(size.width as f32, size.height as f32)/200.,
+            //     -100.,
+            //     100.,
+            // ),
         );
 
         let animation_duration = Duration::from_secs_f32(volumes[0].timesteps as f32*0.05);
@@ -209,7 +219,7 @@ impl WindowContext {
             controller,
             ui_renderer,
             ui_visible: true,
-            background_color: Color32::BLACK,
+            background_color: render_config.background_color,
             camera,
 
             volumes:volumes_gpu,
@@ -220,6 +230,8 @@ impl WindowContext {
             playing: true,
             num_columns,
             selected_channel:None,
+            colormap_editor_visible:render_config.show_colormap_editor,
+            volume_info_visible:render_config.show_volume_info,
         })
     }
 
@@ -276,6 +288,23 @@ impl WindowContext {
         let cell_width = self.config.width as f32 / columns as f32;
         let cell_height = self.config.height as f32 / rows as f32;
 
+        let ui_state = if self.ui_visible {
+            self.ui_renderer.begin_frame(&self.window);
+            ui::ui(self);
+    
+            let shapes = self.ui_renderer.end_frame(&self.window);
+            Some(self.ui_renderer.prepare( PhysicalSize {
+                width: output.texture.size().width,
+                height: output.texture.size().height,
+            },
+            self.scale_factor,
+            &self.wgpu_context.device,
+            &self.wgpu_context.queue,
+            &mut encoder,
+            shapes))
+        }else{None};
+       
+
         if let Some(selected_channel) = self.selected_channel{
             let camera = self.camera.clone();
             frame_data.push(self.renderer.prepare(
@@ -306,12 +335,7 @@ impl WindowContext {
                     view: &view_rgb,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: self.background_color.r() as f64 / 255.,
-                            g: self.background_color.g() as f64 / 255.,
-                            b: self.background_color.b() as f64 / 255.,
-                            a: 1.,
-                        }),
+                        load: wgpu::LoadOp::Clear(self.background_color),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -331,31 +355,20 @@ impl WindowContext {
                 self.renderer
                     .render(&mut render_pass,  &v);
             }
-        }
+            
+            if let Some(state) = &ui_state {
+                // ui rendering
 
+                self.ui_renderer.render(&mut render_pass,state);
+            }
+
+        }
+        if let Some(ui_state) = ui_state {
+            self.ui_renderer.cleanup(ui_state)
+        }
         self.wgpu_context
             .queue
             .submit(std::iter::once(encoder.finish()));
-
-        if self.ui_visible {
-            // ui rendering
-            self.ui_renderer.begin_frame(&self.window);
-            ui::ui(self);
-
-            let shapes = self.ui_renderer.end_frame(&self.window);
-
-            self.ui_renderer.paint(
-                PhysicalSize {
-                    width: output.texture.size().width,
-                    height: output.texture.size().height,
-                },
-                self.scale_factor,
-                &self.wgpu_context.device,
-                &self.wgpu_context.queue,
-                &view_rgb,
-                shapes,
-            );
-        }
 
         output.present();
         Ok(())
@@ -375,6 +388,8 @@ pub async fn open_window(window_builder:WindowBuilder,volumes: Vec<Volume>,cmap:
         .with_title(format!("{name} {version}"))
         .build(&event_loop)
         .unwrap();
+    
+    
     let mut state = WindowContext::new(window, volumes, cmap,&config).await.unwrap();
 
 
@@ -434,7 +449,11 @@ pub async fn open_window(window_builder:WindowBuilder,volumes: Vec<Volume>,cmap:
                 match state.render() {
                     Ok(_) => {}
                     // Reconfigure the surface if lost
-                    Err(wgpu::SurfaceError::Lost) => state.resize(state.window.inner_size(), None),
+                    Err(wgpu::SurfaceError::Lost) =>{
+                        log::error!("lost surface!");
+                         state.resize(state.window.inner_size(), None)
+
+                        },
                     // The system is out of memory, we should probably quit
                     Err(wgpu::SurfaceError::OutOfMemory) =>target.exit(),
                     // All other errors (Outdated, Timeout) should be resolved by the next frame
@@ -451,90 +470,22 @@ pub async fn open_window(window_builder:WindowBuilder,volumes: Vec<Volume>,cmap:
         }
         
         Event::AboutToWait => {
+            #[cfg(target_arch = "wasm32")]
+            use winit::platform::web::WindowExtWebSys;
+            #[cfg(target_arch = "wasm32")]
+            if let Some(canvas) = state.window.canvas() {
+                if canvas.parent_node().is_none() {
+                    // The canvas has been removed from the DOM, we should exit
+                    target.exit();
+                    return;
+                }
+            }
+
             // RedrawRequested will only trigger once, unless we manually
             // request it.
             state.window.request_redraw();
         }
         _ => {},
     }).unwrap();
-}
-
-
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub async fn viewer_inline(npz_file:Vec<u8>,colormap:Vec<u8>,canvas_id:String) {
-    use std::io::Cursor;
-    #[cfg(debug_assertions)]
-    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-    console_log::init().expect("could not initialize logger");
-    let reader = Cursor::new(npz_file);
-    let volumes = Volume::load_numpy(reader,true).expect("Failed to load volumes");
-    
-    let reader_colormap = Cursor::new(colormap);
-    let cmap = ColorMap::from_npy(reader_colormap).unwrap();
-
-    let canvas = web_sys::window()
-    .and_then(|win| win.document())
-    .and_then(|doc| {
-        doc.get_element_by_id(&canvas_id).unwrap().dyn_into::<web_sys::HtmlCanvasElement>().ok()
-    });
-    let window_builder = WindowBuilder::new().with_canvas(canvas);
-
-    wasm_bindgen_futures::spawn_local(open_window(
-        window_builder,
-        volumes,
-        cmap,
-        RenderConfig {
-            no_vsync: false,
-        },
-    ));
-}
-
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-pub async fn viewer_wasm(canvas_id:String) {
-    use std::io::Cursor;
-
-    use web_sys::{HtmlCanvasElement, HtmlElement};
-    #[cfg(debug_assertions)]
-    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-    console_log::init().expect("could not initialize logger");
-   
-    
-    let cmap = cmap::COLORMAPS.get("viridis").unwrap().clone();
-
-    let (canvas,spinner):(HtmlCanvasElement,HtmlElement) = web_sys::window()
-    .and_then(|win| win.document())
-    .and_then(|doc| {
-        let canvas = doc.get_element_by_id(&canvas_id).unwrap().dyn_into::<web_sys::HtmlCanvasElement>().unwrap();
-        let spinner = doc.get_element_by_id("spinner").unwrap().dyn_into::<web_sys::HtmlElement>().unwrap();
-        Some((canvas,spinner))
-    }).unwrap();
-    let size = (canvas.width() as u32,canvas.height() as u32);
-    let window_builder = WindowBuilder::new().with_canvas(Some(canvas)).with_inner_size(PhysicalSize::new(size.0, size.1));
-
-    loop {
-        if let Some(reader) = rfd::AsyncFileDialog::new().set_title("Select npy file").add_filter("numpy file", &["npy","npz"]).pick_file().await {
-
-            spinner.set_attribute("style", "display:flex;")
-            .unwrap();
-            let data = reader.read().await;
-            let reader_v = Cursor::new(data);
-            let volumes = Volume::load_numpy(reader_v,true).expect("Failed to load volumes");
-
-            spinner.set_attribute("style", "display:none;")
-            .unwrap();
-            wasm_bindgen_futures::spawn_local(open_window(
-                window_builder,
-                volumes,
-                cmap,
-                RenderConfig {
-                    no_vsync: false,
-                },
-            ));
-            break;
-        }
-    }
+    log::info!("exit!");
 }

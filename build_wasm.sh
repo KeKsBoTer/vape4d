@@ -1,11 +1,12 @@
 cargo build \
     --no-default-features \
     --target wasm32-unknown-unknown \
+    --features colormaps \
     --lib \
     --profile web-release\
 && wasm-bindgen \
     --out-dir public \
-    --target web\
-    --no-typescript\
+    --no-typescript \
+    --target web \
     target/wasm32-unknown-unknown/web-release/v4dv.wasm \
     

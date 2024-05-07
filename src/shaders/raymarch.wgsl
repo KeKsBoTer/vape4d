@@ -19,8 +19,8 @@ struct Settings {
     step_size: f32,
     temporal_filter: u32,
     distance_scale: f32,
-    vmin:f32,
-    vmax:f32,
+    vmin: f32,
+    vmax: f32,
 }
 
 
@@ -116,8 +116,10 @@ fn next_pos(pos: ptr<function,vec3<f32>>, step_size: f32, ray_dir: vec3<f32>) ->
 }
 
 fn sample_volume(pos: vec3<f32>) -> f32 {
-    let sample_curr = textureSampleLevel(volume, volume_sampler, pos, 0.).r;
-    let sample_next = textureSampleLevel(volume_next, volume_sampler, pos, 0.).r;
+    //  origin is in bottom left corner so we need to flip y 
+    let pos_m = vec3<f32>(pos.x, 1. - pos.y, pos.z);
+    let sample_curr = textureSampleLevel(volume, volume_sampler, pos_m, 0.).r;
+    let sample_next = textureSampleLevel(volume_next, volume_sampler, pos_m, 0.).r;
     if settings.temporal_filter == FILTER_NEAREST {
         return sample_curr;
     } else {
@@ -126,8 +128,8 @@ fn sample_volume(pos: vec3<f32>) -> f32 {
     }
 }
 
-fn sample_cmap(value:f32)->vec4<f32>{
-    let value_n = (value-settings.vmin)/(settings.vmax-settings.vmin);
+fn sample_cmap(value: f32) -> vec4<f32> {
+    let value_n = (value - settings.vmin) / (settings.vmax - settings.vmin);
     return textureSampleLevel(cmap, cmap_sampler, vec2<f32>(value_n, 0.5), 0.);
 }
 

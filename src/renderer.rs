@@ -33,6 +33,7 @@ impl VolumeRenderer {
                 module: &shader,
                 entry_point: "vs_main",
                 buffers: &[],
+                // compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -42,6 +43,7 @@ impl VolumeRenderer {
                     blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
+                // compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
@@ -108,8 +110,7 @@ impl VolumeRenderer {
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(
-                        &volume.textures[step]
-                            .create_view(&wgpu::TextureViewDescriptor::default()),
+                        &volume.textures[step].create_view(&wgpu::TextureViewDescriptor::default()),
                     ),
                 },
                 wgpu::BindGroupEntry {
@@ -280,8 +281,8 @@ pub struct RenderSettings {
     pub spatial_filter: wgpu::FilterMode,
     pub temporal_filter: wgpu::FilterMode,
     pub distance_scale: f32,
-    pub vmin:f32,
-    pub vmax:f32,
+    pub vmin: f32,
+    pub vmax: f32,
 }
 
 #[repr(C)]
@@ -296,8 +297,8 @@ pub struct RenderSettingsUniform {
     step_size: f32,
     temporal_filter: u32,
     distance_scale: f32,
-    vmin:f32,
-    vmax:f32,
+    vmin: f32,
+    vmax: f32,
     _pad: [u32; 1],
 }
 
@@ -315,8 +316,8 @@ impl RenderSettingsUniform {
             step_size: settings.step_size,
             temporal_filter: settings.temporal_filter as u32,
             distance_scale: settings.distance_scale,
-            vmin:settings.vmin,
-            vmax:settings.vmax,
+            vmin: settings.vmin,
+            vmax: settings.vmax,
             _pad: [0; 1],
         }
     }
@@ -334,8 +335,8 @@ impl Default for RenderSettingsUniform {
             step_size: 0.01,
             temporal_filter: wgpu::FilterMode::Nearest as u32,
             distance_scale: 1.,
-            vmin:0.,
-            vmax:1.,
+            vmin: 0.,
+            vmax: 1.,
             _pad: [0; 1],
         }
     }

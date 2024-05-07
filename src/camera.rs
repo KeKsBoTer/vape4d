@@ -1,6 +1,7 @@
 use cgmath::*;
 
 pub type PerspectiveCamera = GenericCamera<PerspectiveProjection>;
+pub type OrthographicCamera = GenericCamera<OrthographicProjection>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GenericCamera<P: Projection> {
@@ -52,12 +53,7 @@ pub struct PerspectiveProjection {
 
 impl Projection for PerspectiveProjection {
     fn projection_matrix(&self) -> Matrix4<f32> {
-        build_proj(
-            self.znear,
-            self.zfar,
-            self.fovx,
-            self.fovy,
-        )
+        build_proj(self.znear, self.zfar, self.fovx, self.fovy)
     }
 }
 
@@ -75,7 +71,7 @@ impl PerspectiveProjection {
         let fovyr = fovy.into();
         Self {
             fovy: fovyr,
-            fovx: fovyr*vr,
+            fovx: fovyr * vr,
             znear,
             zfar,
             aspect_ratio: vr,
@@ -136,7 +132,7 @@ pub struct OrthographicProjection {
 
 impl OrthographicProjection {
     #[allow(unused)]
-    pub fn new(viewport: Vector2<u32>, znear: f32, zfar: f32) -> Self {
+    pub fn new(viewport: Vector2<f32>, znear: f32, zfar: f32) -> Self {
         let vr = viewport.x as f32 / viewport.y as f32;
         Self {
             height: viewport.y as f32,
