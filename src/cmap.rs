@@ -14,7 +14,7 @@ use wgpu::{util::DeviceExt, Extent3d};
 use once_cell::sync::Lazy;
 
 #[cfg(feature = "colormaps")]
-use include_dir::{include_dir, Dir};
+use include_dir::include_dir;
 
 // list of predefined colormaps
 #[cfg(feature = "colormaps")]

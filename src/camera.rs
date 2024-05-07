@@ -1,6 +1,7 @@
 use cgmath::*;
 
 pub type PerspectiveCamera = GenericCamera<PerspectiveProjection>;
+#[allow(unused)]
 pub type OrthographicCamera = GenericCamera<OrthographicProjection>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
