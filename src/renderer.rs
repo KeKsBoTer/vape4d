@@ -275,18 +275,18 @@ impl<P: Projection> From<&GenericCamera<P>> for CameraUniform {
 
 #[derive(Debug, Clone)]
 pub struct RenderSettings {
-    pub clipping_aabb: Aabb<f32>,
+    pub clipping_aabb: Option<Aabb<f32>>,
     pub time: f32,
     pub step_size: f32,
     pub spatial_filter: wgpu::FilterMode,
     pub temporal_filter: wgpu::FilterMode,
     pub distance_scale: f32,
-    pub vmin: f32,
-    pub vmax: f32,
+    pub vmin: Option<f32>,
+    pub vmax: Option<f32>,
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct RenderSettingsUniform {
     volume_aabb_min: Vector4<f32>,
     volume_aabb_max: Vector4<f32>,
@@ -311,13 +311,19 @@ impl RenderSettingsUniform {
             volume_aabb_max: volume_aabb.max.to_vec().extend(0.),
             time: settings.time,
             time_steps: volume.timesteps as u32,
-            clipping_min: settings.clipping_aabb.min.to_vec().extend(0.),
-            clipping_max: settings.clipping_aabb.max.to_vec().extend(0.),
+            clipping_min: settings
+                .clipping_aabb
+                .map(|bb| bb.min.to_vec().extend(0.))
+                .unwrap_or(RenderSettingsUniform::default().clipping_min),
+            clipping_max: settings
+                .clipping_aabb
+                .map(|bb| bb.max.to_vec().extend(0.))
+                .unwrap_or(RenderSettingsUniform::default().clipping_max),
             step_size: settings.step_size,
             temporal_filter: settings.temporal_filter as u32,
             distance_scale: settings.distance_scale,
-            vmin: settings.vmin,
-            vmax: settings.vmax,
+            vmin: settings.vmin.unwrap_or(volume.min_value),
+            vmax: settings.vmax.unwrap_or(volume.max_value),
             _pad: [0; 1],
         }
     }

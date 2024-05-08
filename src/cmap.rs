@@ -1,6 +1,6 @@
 use std::{
     hash::{Hash, Hasher},
-    io::{Read, Seek},
+    io::{Read, Seek, Write},
 };
 
 #[cfg(feature = "colormaps")]
@@ -8,6 +8,7 @@ use std::{collections::HashMap, io::Cursor};
 
 use anyhow::Ok;
 use cgmath::{Vector2, Vector4};
+use npyz::WriterBuilder;
 use wgpu::{util::DeviceExt, Extent3d};
 
 #[cfg(feature = "colormaps")]
@@ -79,6 +80,25 @@ impl ColorMap {
             .zip(alphas)
             .map(|(v, a)| Vector4::new(v[0], v[1], v[2], *a))
             .collect();
+    }
+
+    pub fn save_npy<F: Write>(&self, f: F) -> anyhow::Result<()> {
+        let mut out_file = npyz::WriteOptions::new()
+            .order(npyz::Order::C)
+            .shape(&[self.0.len() as u64, 4])
+            .default_dtype()
+            .writer(f)
+            .begin_nd()?;
+        out_file.extend(self.0.iter().flat_map(|c| {
+            vec![
+                c.x as f32 / 255.,
+                c.y as f32 / 255.,
+                c.z as f32 / 255.,
+                c.w as f32 / 255.,
+            ]
+        }))?;
+        out_file.finish()?;
+        Ok(())
     }
 }
 

@@ -1,6 +1,6 @@
-use std::time::Duration;
+use std::{ops::RangeInclusive, time::Duration};
 
-use egui::{epaint::TextShape, vec2};
+use egui::{emath::Numeric, epaint::TextShape, vec2};
 use egui_plot::{Plot, PlotImage, PlotPoint};
 
 use crate::{
@@ -44,54 +44,6 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     );
                     ui.end_row();
                 }
-
-                ui.label("Clipping Box Min");
-                ui.horizontal(|ui| {
-                    let aabb_min = &mut state.render_settings.clipping_aabb.min;
-                    ui.add(
-                        egui::DragValue::new(&mut aabb_min.x)
-                            .speed(0.01)
-                            .suffix("x")
-                            .clamp_range((0.)..=(1.)),
-                    );
-                    ui.add(
-                        egui::DragValue::new(&mut aabb_min.y)
-                            .speed(0.01)
-                            .suffix("y")
-                            .clamp_range((0.)..=(1.)),
-                    );
-                    ui.add(
-                        egui::DragValue::new(&mut aabb_min.z)
-                            .speed(0.01)
-                            .suffix("z")
-                            .clamp_range((0.)..=(1.)),
-                    );
-                });
-                ui.end_row();
-
-                ui.label("Clipping Box Max");
-                ui.horizontal(|ui| {
-                    let aabb_max = &mut state.render_settings.clipping_aabb.max;
-                    ui.add(
-                        egui::DragValue::new(&mut aabb_max.x)
-                            .speed(0.01)
-                            .suffix("x")
-                            .clamp_range((0.)..=(1.)),
-                    );
-                    ui.add(
-                        egui::DragValue::new(&mut aabb_max.y)
-                            .speed(0.01)
-                            .suffix("y")
-                            .clamp_range((0.)..=(1.)),
-                    );
-                    ui.add(
-                        egui::DragValue::new(&mut aabb_max.z)
-                            .speed(0.01)
-                            .suffix("z")
-                            .clamp_range((0.)..=(1.)),
-                    );
-                });
-                ui.end_row();
 
                 ui.label("Step Size");
                 ui.add(
@@ -148,59 +100,88 @@ pub(crate) fn ui(state: &mut WindowContext) {
             .default_size(vec2(300., 50.))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("vmax");
-                    ui.add(
-                        egui::DragValue::new(&mut state.render_settings.vmin)
-                            .speed(0.01)
-                            .clamp_range(
-                                state.volumes[0].volume.min_value..=state.render_settings.vmax,
-                            ),
-                    );
                     ui.label("vmin");
-                    ui.add(
-                        egui::DragValue::new(&mut state.render_settings.vmax)
-                            .speed(0.01)
-                            .clamp_range(
-                                state.render_settings.vmin..=state.volumes[0].volume.max_value,
-                            ),
+                    let min_b = state
+                        .render_settings
+                        .vmin
+                        .unwrap_or(state.volumes[0].volume.min_value);
+                    let max_b = state
+                        .render_settings
+                        .vmax
+                        .unwrap_or(state.volumes[0].volume.max_value);
+
+                    let vmin_min = state.volumes[0].volume.min_value.min(min_b);
+                    let vmax_max = state.volumes[0].volume.max_value.max(max_b);
+                    optional_drag(
+                        ui,
+                        &mut state.render_settings.vmin,
+                        Some(vmin_min..=max_b),
+                        Some(0.01),
+                        Some(vmin_min),
+                    );
+                    ui.label("vmax");
+                    optional_drag(
+                        ui,
+                        &mut state.render_settings.vmax,
+                        Some(min_b..=vmax_max),
+                        Some(0.01),
+                        Some(vmax_max),
                     );
                 });
                 #[cfg(feature = "colormaps")]
-                ui.horizontal(|ui| {
-                    let cmaps = &COLORMAPS;
-                    let mut selected_cmap: String = ui.ctx().data_mut(|d| {
-                        d.get_persisted_mut_or("selected_cmap".into(), "viridis".to_string())
-                            .clone()
-                    });
-                    ui.label("Colormap");
-                    egui::ComboBox::new("cmap_select", "")
-                        .selected_text(selected_cmap.clone())
-                        .show_ui(ui, |ui| {
-                            let mut keys: Vec<_> = cmaps.iter().collect();
-                            keys.sort_by_key(|e| e.0);
-                            for (name, cmap) in keys {
-                                let texture = load_or_create(ui, cmap);
-                                ui.horizontal(|ui| {
-                                    ui.image(egui::ImageSource::Texture(
-                                        egui::load::SizedTexture {
-                                            id: texture,
-                                            size: vec2(50., 10.),
-                                        },
-                                    ));
-                                    ui.selectable_value(&mut selected_cmap, name.clone(), name);
-                                });
-                            }
+                if state.cmap_select_visible {
+                    ui.horizontal(|ui| {
+                        let cmaps = &COLORMAPS;
+                        let mut selected_cmap: String = ui.ctx().data_mut(|d| {
+                            d.get_persisted_mut_or("selected_cmap".into(), "viridis".to_string())
+                                .clone()
                         });
-                    cmap = cmaps[&selected_cmap].clone();
-                    ui.ctx()
-                        .data_mut(|d| d.insert_persisted("selected_cmap".into(), selected_cmap));
-                });
+                        ui.label("Colormap");
+                        egui::ComboBox::new("cmap_select", "")
+                            .selected_text(selected_cmap.clone())
+                            .show_ui(ui, |ui| {
+                                let mut keys: Vec<_> = cmaps.iter().collect();
+                                keys.sort_by_key(|e| e.0);
+                                for (name, cmap) in keys {
+                                    let texture = load_or_create(ui, cmap);
+                                    ui.horizontal(|ui| {
+                                        ui.image(egui::ImageSource::Texture(
+                                            egui::load::SizedTexture {
+                                                id: texture,
+                                                size: vec2(50., 10.),
+                                            },
+                                        ));
+                                        ui.selectable_value(&mut selected_cmap, name.clone(), name);
+                                    });
+                                }
+                            });
+                        cmap = cmaps[&selected_cmap].clone();
+                        ui.ctx().data_mut(|d| {
+                            d.insert_persisted("selected_cmap".into(), selected_cmap)
+                        });
+                    });
+                }
                 ColorMapBuilder::new("cmap_builder").show(
                     ui,
                     &mut cmap,
-                    state.render_settings.vmin,
-                    state.render_settings.vmax,
+                    state
+                        .render_settings
+                        .vmin
+                        .unwrap_or(state.volumes[0].volume.min_value),
+                    state
+                        .render_settings
+                        .vmax
+                        .unwrap_or(state.volumes[0].volume.max_value),
                 );
+                ui.end_row();
+                #[cfg(not(target_arch = "wasm32"))]
+                ui.horizontal(|ui| {
+                    ui.text_edit_singleline(&mut state.cmap_save_path);
+                    if ui.button("Save").clicked() {
+                        let file = std::fs::File::create(state.cmap_save_path.clone()).unwrap();
+                        state.cmap.color_map().save_npy(&file).unwrap();
+                    }
+                });
             });
     }
     state
@@ -442,7 +423,7 @@ fn load_or_create(ui: &egui::Ui, cmap: &ColorMap) -> egui::TextureId {
             let width = cmap.values().len();
             let tex = ui.ctx().load_texture(
                 id.value().to_string(),
-                egui::ColorImage::from_rgba_premultiplied(
+                egui::ColorImage::from_rgba_unmultiplied(
                     [width, 1],
                     bytemuck::cast_slice(cmap.values()),
                 ),
@@ -452,5 +433,43 @@ fn load_or_create(ui: &egui::Ui, cmap: &ColorMap) -> egui::TextureId {
             ui.ctx().data_mut(|d| d.insert_temp(id, tex));
             return tex_id;
         }
+    }
+}
+
+fn optional_drag<T: Numeric>(
+    ui: &mut egui::Ui,
+    opt: &mut Option<T>,
+    range: Option<RangeInclusive<T>>,
+    speed: Option<impl Into<f64>>,
+    default: Option<T>,
+) {
+    let mut placeholder = default.unwrap_or(T::from_f64(0.));
+    let mut drag = if let Some(ref mut val) = opt {
+        egui_winit::egui::DragValue::new(val)
+    } else {
+        egui_winit::egui::DragValue::new(&mut placeholder).custom_formatter(|_, _| {
+            if let Some(v) = default {
+                format!("{:.2}", v.to_f64())
+            } else {
+                "—".into()
+            }
+        })
+    };
+    if let Some(range) = range {
+        drag = drag.clamp_range(range);
+    }
+    if let Some(speed) = speed {
+        drag = drag.speed(speed);
+    }
+    let changed = ui.add(drag).changed();
+    if ui
+        .add_enabled(opt.is_some(), egui::Button::new("↺"))
+        .on_hover_text("Reset to default")
+        .clicked()
+    {
+        *opt = None;
+    }
+    if changed && opt.is_none() {
+        *opt = Some(placeholder);
     }
 }

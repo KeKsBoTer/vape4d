@@ -36,10 +36,15 @@ impl From<Color> for wgpu::Color {
 }
 
 #[wasm_bindgen]
+#[derive(Debug)]
 pub struct InlineViewerConfig {
     pub background_color: Color,
     pub show_colormap_editor: bool,
     pub show_volume_info: bool,
+    pub show_cmap_select: bool,
+    // for normalization
+    pub vmin: Option<f32>,
+    pub vmax: Option<f32>,
 }
 
 #[wasm_bindgen]
@@ -49,11 +54,17 @@ impl InlineViewerConfig {
         background_color: Color,
         show_colormap_editor: bool,
         show_volume_info: bool,
+        show_cmap_select: bool,
+        vmin: Option<f32>,
+        vmax: Option<f32>,
     ) -> Self {
         Self {
             background_color,
             show_colormap_editor,
             show_volume_info,
+            show_cmap_select,
+            vmin,
+            vmax,
         }
     }
 }
@@ -67,7 +78,7 @@ pub async fn viewer_inline(
     use std::io::Cursor;
     #[cfg(debug_assertions)]
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-    // console_log::init().expect("could not initialize logger");
+    console_log::init().expect("could not initialize logger");
     let reader = Cursor::new(npz_file);
     let volumes = Volume::load_numpy(reader, true).expect("Failed to load volumes");
 
@@ -92,6 +103,7 @@ pub async fn viewer_inline(
         .unwrap();
     let window_builder = WindowBuilder::new().with_canvas(canvas);
     spinner.set_attribute("style", "display:none;").unwrap();
+
     wasm_bindgen_futures::spawn_local(open_window(
         window_builder,
         volumes,
@@ -101,6 +113,10 @@ pub async fn viewer_inline(
             background_color: settings.background_color.into(),
             show_colormap_editor: settings.show_colormap_editor,
             show_volume_info: settings.show_volume_info,
+            vmin: settings.vmin,
+            vmax: settings.vmax,
+            #[cfg(feature = "colormaps")]
+            show_cmap_select: settings.show_cmap_select,
         },
     ));
 }
@@ -163,6 +179,9 @@ pub async fn viewer_wasm(canvas_id: String) {
                     background_color: wgpu::Color::BLACK,
                     show_colormap_editor: true,
                     show_volume_info: true,
+                    show_cmap_select: true,
+                    vmin: None,
+                    vmax: None,
                 },
             ));
             break;

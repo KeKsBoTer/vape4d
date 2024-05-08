@@ -50,6 +50,10 @@ async fn main() -> anyhow::Result<()> {
             background_color: wgpu::Color::BLACK,
             show_colormap_editor: true,
             show_volume_info: true,
+            vmin: None,
+            vmax: None,
+            #[cfg(feature = "colormaps")]
+            show_cmap_select: true,
         },
     )
     .await;

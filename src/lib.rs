@@ -29,7 +29,7 @@ use winit::{
 use crate::{
     camera::PerspectiveProjection,
     cmap::{ColorMap, ColorMapGPU},
-    volume::{Aabb, Volume},
+    volume::Volume,
 };
 
 mod camera;
@@ -39,12 +39,18 @@ mod renderer;
 mod ui;
 mod ui_renderer;
 pub mod volume;
+// pub mod image;
 
+#[derive(Debug)]
 pub struct RenderConfig {
     pub no_vsync: bool,
     pub background_color: wgpu::Color,
     pub show_colormap_editor:bool,
     pub show_volume_info:bool,
+    pub vmin:Option<f32>,
+    pub vmax:Option<f32>,
+    #[cfg(feature = "colormaps")]
+    pub show_cmap_select:bool,
 }
 
 pub struct WGPUContext {
@@ -109,6 +115,10 @@ pub struct WindowContext {
 
     colormap_editor_visible:bool,
     volume_info_visible:bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    cmap_save_path:String,
+    #[cfg(feature = "colormaps")]
+    cmap_select_visible:bool,
 }
 
 impl WindowContext {
@@ -134,6 +144,7 @@ impl WindowContext {
         let wgpu_context = WGPUContext::new(&instance, Some(&surface)).await;
 
         log::info!("device: {:?}", wgpu_context.adapter.get_info().name);
+        log::info!("settings {:?}", render_config);
 
         let device = &wgpu_context.device;
         let queue = &wgpu_context.queue;
@@ -173,14 +184,14 @@ impl WindowContext {
         let renderer = VolumeRenderer::new(device, surface_format);
 
         let render_settings = RenderSettings {
-            clipping_aabb: Aabb::unit(),
+            clipping_aabb: None,
             time: 0.,
             step_size: 2. / 1000.,
             spatial_filter: wgpu::FilterMode::Linear,
             temporal_filter: wgpu::FilterMode::Linear,
             distance_scale: 1.,
-            vmin:volumes[0].min_value,
-            vmax:volumes[0].max_value,
+            vmin:render_config.vmin,
+            vmax:render_config.vmax,
         };
 
         let mut controller = CameraController::new(0.1, 0.05);
@@ -232,6 +243,10 @@ impl WindowContext {
             selected_channel:None,
             colormap_editor_visible:render_config.show_colormap_editor,
             volume_info_visible:render_config.show_volume_info,
+            #[cfg(not(target_arch = "wasm32"))]
+            cmap_save_path:"cmap.npy".to_string(),
+            #[cfg(feature = "colormaps")]
+            cmap_select_visible:render_config.show_cmap_select,
         })
     }
 

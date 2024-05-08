@@ -31,13 +31,14 @@ impl Volume {
     pub fn read_dyn<'a, R, P>(array: NpyFile<R>, time_first: bool) -> anyhow::Result<Vec<Self>>
     where
         R: Read,
-        P: Into<f32> + Deserialize,
+        P: Into<f64> + Deserialize,
     {
         let start = Instant::now();
         let time_dim = if time_first { 0 } else { 1 };
         let channel_dim = if time_first { 1 } else { 0 };
         let timesteps = array.shape()[time_dim] as usize;
         let channels = array.shape()[channel_dim] as usize;
+        log::debug!("size: {:?}", array.shape());
         let resolution = [
             array.shape()[2] as u32,
             array.shape()[3] as u32,
@@ -51,7 +52,8 @@ impl Volume {
         let mut min_value = f32::MAX;
         let mut max_value = f32::MIN;
         for (i, v) in array.data::<P>()?.enumerate() {
-            let v32: f32 = v.unwrap().into();
+            let v64: f64 = v.unwrap().into();
+            let v32: f32 = v64 as f32;
             let v = f16::from_f32(v32);
             if v32 > max_value {
                 max_value = v32;
@@ -110,6 +112,7 @@ impl Volume {
                 npyz::TypeChar::Float => match d.num_bytes().unwrap() {
                     2 => Self::read_dyn::<_, f16>(array, time_first),
                     4 => Self::read_dyn::<_, f32>(array, time_first),
+                    8 => Self::read_dyn::<_, f64>(array, time_first),
                     _ => anyhow::bail!("unsupported type {:}", d),
                 },
                 npyz::TypeChar::Uint => match d.num_bytes().unwrap() {

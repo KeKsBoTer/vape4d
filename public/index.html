@@ -11,7 +11,7 @@
             width: 100vw;
             height: 100vh;
             overflow: hidden;
-            background-color: black;
+            background-color: transparent;
             color: white;
             font-family: Arial, Helvetica, sans-serif;
         }
@@ -124,30 +124,33 @@
 
         let url = new URL(window.location.href);
         if (url.searchParams.get("inline") !== null) {
-            console.log("inline mode");
 
             window.addEventListener(
                 "message",
                 async (event) => {
-                    console.log(event.origin);
                     if (event.origin == window.origin) {
                         return;
                     }
                     let init_promise = init();
                     await init_promise;
+                    let settings = event.data["settings"];
                     viewer_inline(
                         event.data["volume"],
                         event.data["cmap"],
                         "window-canvas",
                         new InlineViewerConfig(
-                            new Color(0., 0., 0., 1.), false, false
+                            new Color(...settings["background_color"]), // background color
+                            settings["show_colormap_editor"], // show colormap editor
+                            settings["show_volume_info"], // show volume info
+                            false, // show colormap select editor
+                            settings["vmin"],
+                            settings["vmax"],
                         )
                     );
                     window.removeEventListener("message", this)
                 },
             );
             window.parent.postMessage("ready", "*");
-            window.parent = window.top = null;
         } else {
             let init_promise = init();
             await init_promise;

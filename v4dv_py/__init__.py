@@ -1,13 +1,21 @@
+import dataclasses
 import io
+import json
+from typing import Optional
 import numpy as np
 import random
-from IPython.display import HTML, DisplayObject
+from IPython.display import DisplayObject
 import base64
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
+
+import numpy as np
+from matplotlib.colors import Colormap
+from matplotlib.colors import LinearSegmentedColormap, ListedColormap
+
 
 TEMPLATE_IFRAME = """
     <div>
-        <iframe id="{canvas_id}" src="https://keksboter.github.io/v4dv/index.html?inline" width="{canvas_width}" height="{canvas_height}"></iframe>
+        <iframe id="{canvas_id}" src="http://localhost:5500/public/index.html?inline" width="{canvas_width}" height="{canvas_height}" frameBorder="0" sandbox="allow-same-origin allow-scripts"></iframe>
     </div>
     <script>
 
@@ -20,9 +28,11 @@ TEMPLATE_IFRAME = """
                 let data_decoded = Uint8Array.from(atob("{data_code}"), c => c.charCodeAt(0));
                 let cmap_decoded = Uint8Array.from(atob("{cmap_code}"), c => c.charCodeAt(0));
                 const iframe = document.getElementById("{canvas_id}");
+                if (iframe === null) return;
                 iframe.contentWindow.postMessage({{
                     volume: data_decoded,
-                    cmap: cmap_decoded
+                    cmap: cmap_decoded,
+                    settings: {settings_json}
                 }},
                 "*");
             }},
@@ -39,6 +49,8 @@ class ViewerSettings:
     background_color: tuple
     show_colormap_editor: bool
     show_volume_info: bool
+    vmin: Optional[float]
+    vmax: Optional[float]
 
 
 def show(
@@ -49,12 +61,20 @@ def show(
     background_color=(0.0, 0.0, 0.0, 1.0),
     show_colormap_editor=False,
     show_volume_info=False,
+    vmin=None,
+    vmax=None,
 ):
     return VolumeRenderer(
         data,
         colormap,
         ViewerSettings(
-            width, height, background_color, show_colormap_editor, show_volume_info
+            width,
+            height,
+            background_color,
+            show_colormap_editor,
+            show_volume_info,
+            vmin,
+            vmax,
         ),
     )
 
@@ -86,8 +106,7 @@ class VolumeRenderer(DisplayObject):
             cmap_code=cmap_code.decode("utf-8"),
             canvas_width=settings.width,
             canvas_height=settings.height,
-            show_colormap_editor="true" if settings.show_colormap_editor else "false",
-            show_volume_info="true" if settings.show_volume_info else "false",
+            settings_json=json.dumps(dataclasses.asdict(settings)),
         )
         return html_code
 
@@ -98,3 +117,27 @@ class VolumeRenderer(DisplayObject):
         special characters (<>&) escaped.
         """
         return self._repr_html_()
+
+
+def felix_cmap_hack(cmap: Colormap) -> Colormap:
+    """changes the alpha channel of a colormap to be diverging (0->1, 0.5 > 0, 1->1)
+
+    Args:
+        cmap (Colormap): colormap
+
+    Returns:
+        Colormap: new colormap
+    """
+    cmap = cmap.copy()
+    if isinstance(cmap, ListedColormap):
+        for i, a in enumerate(cmap.colors):
+            a.append(2 * abs(i / cmap.N - 0.5))
+    elif isinstance(cmap, LinearSegmentedColormap):
+        cmap._segmentdata["alpha"] = np.array(
+            [[0.0, 1.0, 1.0], [0.5, 0.0, 0.0], [1.0, 1.0, 1.0]]
+        )
+    else:
+        raise TypeError(
+            "cmap must be either a ListedColormap or a LinearSegmentedColormap"
+        )
+    return cmap
