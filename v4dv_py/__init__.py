@@ -15,7 +15,7 @@ from matplotlib.colors import LinearSegmentedColormap, ListedColormap
 
 TEMPLATE_IFRAME = """
     <div>
-        <iframe id="{canvas_id}" src="http://localhost:5500/public/index.html?inline" width="{canvas_width}" height="{canvas_height}" frameBorder="0" sandbox="allow-same-origin allow-scripts"></iframe>
+        <iframe id="{canvas_id}" src="https://keksboter.github.io/v4dv/index.html?inline" width="{canvas_width}" height="{canvas_height}" frameBorder="0" sandbox="allow-same-origin allow-scripts"></iframe>
     </div>
     <script>
 
@@ -130,6 +130,7 @@ def felix_cmap_hack(cmap: Colormap) -> Colormap:
     """
     cmap = cmap.copy()
     if isinstance(cmap, ListedColormap):
+        cmap.colors = cmap.colors.copy()
         for i, a in enumerate(cmap.colors):
             a.append(2 * abs(i / cmap.N - 0.5))
     elif isinstance(cmap, LinearSegmentedColormap):
