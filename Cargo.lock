@@ -3783,6 +3783,8 @@ dependencies = [
  "once_cell",
  "pollster",
  "rfd",
+ "serde",
+ "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-cli",
  "wasm-bindgen-futures",

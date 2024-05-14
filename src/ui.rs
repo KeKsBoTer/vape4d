@@ -4,7 +4,7 @@ use egui::{emath::Numeric, epaint::TextShape, vec2};
 use egui_plot::{Plot, PlotImage, PlotPoint};
 
 use crate::{
-    cmap::{rasterize_tf, ColorMap},
+    cmap::{ColorMap, COLORMAP_RESOLUTION},
     WindowContext,
 };
 
@@ -93,7 +93,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
             });
     });
 
-    let mut cmap = state.cmap.color_map().clone();
+    // let mut cmap = state.cmap.clone();
 
     if state.colormap_editor_visible {
         egui::Window::new("Transfer Function")
@@ -137,13 +137,14 @@ pub(crate) fn ui(state: &mut WindowContext) {
                                 .clone()
                         });
                         ui.label("Colormap");
+                        let old_selected_cmap = selected_cmap.clone();
                         egui::ComboBox::new("cmap_select", "")
                             .selected_text(selected_cmap.clone())
                             .show_ui(ui, |ui| {
                                 let mut keys: Vec<_> = cmaps.iter().collect();
                                 keys.sort_by_key(|e| e.0);
                                 for (name, cmap) in keys {
-                                    let texture = load_or_create(ui, cmap);
+                                    let texture = load_or_create(ui, cmap, COLORMAP_RESOLUTION);
                                     ui.horizontal(|ui| {
                                         ui.image(egui::ImageSource::Texture(
                                             egui::load::SizedTexture {
@@ -155,38 +156,47 @@ pub(crate) fn ui(state: &mut WindowContext) {
                                     });
                                 }
                             });
-                        cmap = cmaps[&selected_cmap].clone();
-                        ui.ctx().data_mut(|d| {
-                            d.insert_persisted("selected_cmap".into(), selected_cmap)
-                        });
+                        if old_selected_cmap != selected_cmap {
+                            state.cmap =
+                                cmaps[&selected_cmap].into_linear_segmented(COLORMAP_RESOLUTION);
+
+                            ui.ctx().data_mut(|d| {
+                                d.insert_persisted("selected_cmap".into(), selected_cmap)
+                            });
+                        }
                     });
                 }
-                ColorMapBuilder::new("cmap_builder").show(
-                    ui,
-                    &mut cmap,
-                    state
-                        .render_settings
-                        .vmin
-                        .unwrap_or(state.volumes[0].volume.min_value),
-                    state
-                        .render_settings
-                        .vmax
-                        .unwrap_or(state.volumes[0].volume.max_value),
-                );
+                let vmin = state
+                    .render_settings
+                    .vmin
+                    .unwrap_or(state.volumes[0].volume.min_value);
+                let vmax = state
+                    .render_settings
+                    .vmax
+                    .unwrap_or(state.volumes[0].volume.max_value);
+                show_cmap(ui, egui::Id::new("cmap preview"), &state.cmap, vmin, vmax);
+
+                ui.label("Alpha Channel");
+                if ui.button("felix hack").clicked() {
+                    state.cmap.a = vec![(0.0, 1.0, 1.0), (0.5, 0., 0.), (1.0, 1.0, 1.0)];
+                }
+
+                tf_ui(ui, &mut state.cmap.a);
                 ui.end_row();
                 #[cfg(not(target_arch = "wasm32"))]
                 ui.horizontal(|ui| {
                     ui.text_edit_singleline(&mut state.cmap_save_path);
                     if ui.button("Save").clicked() {
                         let file = std::fs::File::create(state.cmap_save_path.clone()).unwrap();
-                        state.cmap.color_map().save_npy(&file).unwrap();
+
+                        serde_json::to_writer(file, &state.cmap).unwrap();
                     }
                 });
             });
     }
     state
-        .cmap
-        .set_color_map(cmap, &state.wgpu_context.device, &state.wgpu_context.queue);
+        .cmap_gpu
+        .update(&state.wgpu_context.queue, &state.cmap);
 
     if state.volume_info_visible {
         egui::Window::new("Volume Info").show(ctx, |ui| {
@@ -274,10 +284,10 @@ pub fn argsort<T: PartialOrd>(data: &[T]) -> Vec<usize> {
     indices
 }
 
-use cgmath::{Transform, Vector2, Vector3, Zero};
+use cgmath::{Transform, Vector3, Zero};
 use egui::{epaint::PathShape, *};
 
-pub fn tf_ui(ui: &mut Ui, points: &mut Vec<Vector2<f32>>) -> egui::Response {
+pub fn tf_ui(ui: &mut Ui, points: &mut Vec<(f32, f32, f32)>) -> egui::Response {
     let (response, painter) = ui.allocate_painter(
         vec2(ui.available_width(), 100.),
         Sense::hover().union(Sense::click()),
@@ -292,11 +302,11 @@ pub fn tf_ui(ui: &mut Ui, points: &mut Vec<Vector2<f32>>) -> egui::Response {
     if response.clicked() {
         if let Some(pos) = response.interact_pointer_pos() {
             let pp = to_screen.inverse().transform_pos(pos);
-            let pp = Vector2::new(pp.x, 1. - pp.y);
+            let pp = (pp.x, 1. - pp.y, 1. - pp.y);
             let idx = points
                 .iter()
                 .enumerate()
-                .find_map(|p| if p.1.x > pp.x { Some(p.0) } else { None })
+                .find_map(|p| if p.1 .0 > pp.0 { Some(p.0) } else { None })
                 .unwrap_or(points.len() - 1);
             points.insert(idx, pp);
         }
@@ -309,7 +319,7 @@ pub fn tf_ui(ui: &mut Ui, points: &mut Vec<Vector2<f32>>) -> egui::Response {
     let mut control_point_shapes = Vec::with_capacity(n);
     for (i, point) in points.iter().enumerate() {
         let size = Vec2::splat(2.0 * control_point_radius);
-        let pos = pos2(point.x, 1. - point.y);
+        let pos = pos2(point.0, 1. - point.1);
         let point_in_screen = to_screen.transform_pos(pos);
         let point_rect = Rect::from_center_size(point_in_screen, size);
         let point_id = response.id.with(i);
@@ -325,14 +335,14 @@ pub fn tf_ui(ui: &mut Ui, points: &mut Vec<Vector2<f32>>) -> egui::Response {
                 t.x = 0.;
             }
             // point cannot move past its neighbors
-            let left = if i == 0 { 0. } else { points[i - 1].x + e };
-            let right = if i == n - 1 { 1. } else { points[i + 1].x - e };
+            let left = if i == 0 { 0. } else { points[i - 1].0 + e };
+            let right = if i == n - 1 { 1. } else { points[i + 1].0 - e };
             let bbox = Rect::from_min_max(Pos2::new(left, 0.), Pos2::new(right, 1.));
 
-            let mut new_point = pos2(point.x, 1. - point.y);
+            let mut new_point = pos2(point.0, 1. - point.1);
             new_point += to_screen.inverse().scale() * t;
             new_point = to_screen.from().intersect(bbox).clamp(new_point);
-            new_points.push(Vector2::new(new_point.x, 1. - new_point.y));
+            new_points.push((new_point.x, 1. - new_point.y, 1. - new_point.y));
 
             let point_in_screen = to_screen.transform_pos(new_point);
             let stroke = ui.style().interact(&point_response).fg_stroke;
@@ -349,7 +359,7 @@ pub fn tf_ui(ui: &mut Ui, points: &mut Vec<Vector2<f32>>) -> egui::Response {
 
     let points_in_screen: Vec<Pos2> = points
         .iter()
-        .map(|p| to_screen.transform_pos(pos2(p.x, 1. - p.y)))
+        .map(|p| to_screen.transform_pos(pos2(p.0, 1. - p.1)))
         .collect();
 
     painter.add(PathShape::line(points_in_screen, stroke));
@@ -357,75 +367,21 @@ pub fn tf_ui(ui: &mut Ui, points: &mut Vec<Vector2<f32>>) -> egui::Response {
     response
 }
 
-pub struct ColorMapBuilder {
-    id_source: Id,
-}
-
-impl ColorMapBuilder {
-    pub fn new(id_source: impl std::hash::Hash) -> Self {
-        Self {
-            id_source: Id::new(id_source),
-        }
-    }
-
-    fn show(self, ui: &mut Ui, color_map: &mut ColorMap, vmin: f32, vmax: f32) {
-        let id = ui.make_persistent_id(self.id_source);
-        let texture = load_or_create(ui, &color_map);
-        let width = vmax - vmin;
-        let height = width / 5.;
-        let image = PlotImage::new(
-            texture,
-            PlotPoint::new(vmin + width * 0.5, height / 2.),
-            vec2(width, height),
-        );
-        let plot = Plot::new(id)
-            .show_x(true)
-            .show_y(false)
-            .height(100.)
-            .show_background(false)
-            .show_grid(false)
-            .custom_y_axes(vec![])
-            .allow_boxed_zoom(false)
-            .allow_double_click_reset(false)
-            .allow_drag(false)
-            .allow_scroll(false)
-            .allow_zoom(false);
-        plot.show(ui, |plot_ui| {
-            plot_ui.image(image);
-        });
-        ui.label("Alpha Channel");
-
-        let mut alpha_tf: Vec<Vector2<f32>> = ui.data_mut(|d| {
-            d.get_persisted_mut_or(
-                id.with("alpha_tf"),
-                vec![Vector2::new(0., 0.), Vector2::new(1., 1.)],
-            )
-            .clone()
-        });
-
-        tf_ui(ui, &mut alpha_tf);
-
-        let alpha_values = rasterize_tf(&alpha_tf, color_map.values().len() as u32);
-        color_map.update_alpha(&alpha_values);
-
-        ui.data_mut(|d: &mut util::IdTypeMap| {
-            d.insert_persisted(id.with("alpha_tf"), alpha_tf);
-        });
-    }
-}
-
-fn load_or_create(ui: &egui::Ui, cmap: &ColorMap) -> egui::TextureId {
-    let id = Id::new(cmap);
+use std::hash::Hash;
+fn load_or_create<C>(ui: &egui::Ui, cmap: C, n: u32) -> egui::TextureId
+where
+    C: ColorMap + Hash,
+{
+    let id = Id::new(&cmap);
     let tex: Option<egui::TextureHandle> = ui.ctx().data_mut(|d| d.get_temp(id));
     match tex {
         Some(tex) => tex.id(),
         None => {
-            let width = cmap.values().len();
             let tex = ui.ctx().load_texture(
                 id.value().to_string(),
                 egui::ColorImage::from_rgba_unmultiplied(
-                    [width, 1],
-                    bytemuck::cast_slice(cmap.values()),
+                    [n as usize, 1],
+                    bytemuck::cast_slice(&cmap.rasterize(n as usize)),
                 ),
                 egui::TextureOptions::LINEAR,
             );
@@ -472,4 +428,30 @@ fn optional_drag<T: Numeric>(
     if changed && opt.is_none() {
         *opt = Some(placeholder);
     }
+}
+
+fn show_cmap(ui: &mut egui::Ui, id: egui::Id, cmap: impl ColorMap + Hash, vmin: f32, vmax: f32) {
+    let texture = load_or_create(ui, cmap, COLORMAP_RESOLUTION);
+    let width = vmax - vmin;
+    let height = width / 5.;
+    let image = PlotImage::new(
+        texture,
+        PlotPoint::new(vmin + width * 0.5, height / 2.),
+        vec2(width, height),
+    );
+    let plot = Plot::new(id)
+        .show_x(true)
+        .show_y(false)
+        .height(100.)
+        .show_background(false)
+        .show_grid(false)
+        .custom_y_axes(vec![])
+        .allow_boxed_zoom(false)
+        .allow_double_click_reset(false)
+        .allow_drag(false)
+        .allow_scroll(false)
+        .allow_zoom(false);
+    plot.show(ui, |plot_ui| {
+        plot_ui.image(image);
+    });
 }

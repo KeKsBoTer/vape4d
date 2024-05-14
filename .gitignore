@@ -1,4 +1,5 @@
 /target
+colormaps/
 **/*.npz
 **/*.npy
 .vscode/

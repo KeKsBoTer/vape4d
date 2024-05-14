@@ -161,7 +161,7 @@ impl Volume {
     }
 }
 
-pub(crate) struct VolumeGPU {
+pub struct VolumeGPU {
     pub(crate) textures: Vec<wgpu::Texture>,
     pub(crate) volume: Volume,
 }

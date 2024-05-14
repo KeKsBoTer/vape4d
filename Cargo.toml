@@ -34,6 +34,8 @@ npyz = { version = "0.8.3", features = ["npz", "half"] }
 futures-intrusive = "0.5.0"
 include_dir = "0.7.3"
 web-sys = { version = "0.3.69", features = ["GpuColorDict"] }
+serde = { version = "1.0.130", features = ["derive"] }
+serde_json = "1.0.68"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster = { version = "0.3.0", features = ["macro"] }

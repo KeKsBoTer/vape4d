@@ -11,6 +11,7 @@ pub struct VolumeRenderer {
     pipeline: wgpu::RenderPipeline,
     sampler_nearest: wgpu::Sampler,
     sampler_linear: wgpu::Sampler,
+    format: wgpu::TextureFormat,
 }
 
 impl VolumeRenderer {
@@ -76,6 +77,7 @@ impl VolumeRenderer {
             pipeline,
             sampler_nearest,
             sampler_linear,
+            format: color_format,
         }
     }
 
@@ -215,6 +217,9 @@ impl VolumeRenderer {
             ],
         })
     }
+    pub fn format(&self) -> wgpu::TextureFormat {
+        self.format
+    }
 }
 
 pub struct PerFrameData<'a> {
@@ -283,6 +288,21 @@ pub struct RenderSettings {
     pub distance_scale: f32,
     pub vmin: Option<f32>,
     pub vmax: Option<f32>,
+}
+
+impl Default for RenderSettings {
+    fn default() -> Self {
+        Self {
+            clipping_aabb: None,
+            time: 0.,
+            step_size: 1e-4,
+            spatial_filter: wgpu::FilterMode::Linear,
+            temporal_filter: wgpu::FilterMode::Linear,
+            distance_scale: 1.,
+            vmin: None,
+            vmax: None,
+        }
+    }
 }
 
 #[repr(C)]

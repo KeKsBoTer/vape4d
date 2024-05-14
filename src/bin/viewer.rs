@@ -1,7 +1,7 @@
 use clap::Parser;
 use std::{fmt::Debug, fs::File, io::BufReader, path::PathBuf};
 use v4dv::{
-    cmap::{self},
+    cmap::{self, COLORMAP_RESOLUTION},
     open_window,
     volume::Volume,
     RenderConfig,
@@ -37,14 +37,17 @@ async fn main() -> anyhow::Result<()> {
         .expect("Failed to load volume");
 
     #[cfg(feature = "colormaps")]
-    let cmap = cmap::COLORMAPS.get("viridis").unwrap().clone();
+    let cmap = cmap::COLORMAPS.get("summer").unwrap().clone();
     #[cfg(not(feature = "colormaps"))]
-    let cmap = cmap::ColorMap::from_npy(File::open(&opt.colormap)?)?;
+    let cmap = {
+        let reader = File::open(&opt.colormap)?;
+        ColorMapType::read(reader)?
+    };
 
     open_window(
         window_builder,
         volumes,
-        cmap,
+        cmap.into_linear_segmented(COLORMAP_RESOLUTION),
         RenderConfig {
             no_vsync: opt.no_vsync,
             background_color: wgpu::Color::BLACK,

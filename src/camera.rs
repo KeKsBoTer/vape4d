@@ -1,5 +1,7 @@
 use cgmath::*;
 
+use crate::volume::Aabb;
+
 pub type PerspectiveCamera = GenericCamera<PerspectiveProjection>;
 #[allow(unused)]
 pub type OrthographicCamera = GenericCamera<OrthographicProjection>;
@@ -19,6 +21,17 @@ impl<P: Projection> GenericCamera<P> {
         }
     }
 
+    pub fn new_aabb_iso(aabb: Aabb<f32>, projection: P) -> Self {
+        let r = aabb.radius();
+        let corner = vec3(1., -1., 1.);
+        let view_dir = Quaternion::look_at(-corner, Vector3::unit_y());
+        GenericCamera::new(
+            aabb.center() + corner.normalize() * r * 2.8,
+            view_dir,
+            projection,
+        )
+    }
+
     pub fn view_matrix(&self) -> Matrix4<f32> {
         world2view(self.rotation, self.position)
     }
@@ -27,6 +40,7 @@ impl<P: Projection> GenericCamera<P> {
         self.projection.projection_matrix()
     }
 }
+
 impl Default for PerspectiveCamera {
     fn default() -> Self {
         Self {

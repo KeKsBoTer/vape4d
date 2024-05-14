@@ -1,13 +1,13 @@
 use std::{
     hash::{Hash, Hasher},
-    io::{Read, Seek, Write},
+    io::{Read, Seek, SeekFrom, Write},
 };
 
 #[cfg(feature = "colormaps")]
 use std::{collections::HashMap, io::Cursor};
 
 use anyhow::Ok;
-use cgmath::{Vector2, Vector4};
+use cgmath::Vector4;
 use npyz::WriterBuilder;
 use wgpu::{util::DeviceExt, Extent3d};
 
@@ -19,29 +19,30 @@ use include_dir::include_dir;
 
 // list of predefined colormaps
 #[cfg(feature = "colormaps")]
-pub static COLORMAPS: Lazy<HashMap<String, ColorMap>> = Lazy::new(|| {
-    let cmaps: HashMap<String, ColorMap> = include_dir!("colormaps")
+pub static COLORMAPS: Lazy<HashMap<String, ColorMapType>> = Lazy::new(|| {
+    let cmaps: HashMap<String, ColorMapType> = include_dir!("colormaps")
         .files()
         .filter_map(|f| {
+            let file_name = f.path();
             let reader = Cursor::new(f.contents());
-            let name = f.path().file_stem().unwrap().to_str().unwrap().to_string();
-            let cmap = ColorMap::from_npy(reader).unwrap();
-            Some((name.clone(), cmap))
+            let name = file_name.file_stem().unwrap().to_str().unwrap().to_string();
+            let cmap = ColorMapType::read(reader).unwrap();
+            return Some((name, cmap));
         })
         .collect();
     cmaps
 });
 
 #[derive(Debug, Clone)]
-pub struct ColorMap(Vec<Vector4<u8>>);
+pub struct ListedColorMap(Vec<Vector4<u8>>);
 
-impl Hash for ColorMap {
+impl Hash for ListedColorMap {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.hash(state);
     }
 }
 
-impl ColorMap {
+impl ListedColorMap {
     pub fn new(values: Vec<Vector4<u8>>) -> Self {
         Self(values)
     }
@@ -65,11 +66,6 @@ impl ColorMap {
             .collect();
         Ok(Self::new(values))
     }
-
-    pub(crate) fn values(&self) -> &Vec<Vector4<u8>> {
-        &self.0
-    }
-
     pub fn update_alpha(&mut self, alphas: &[u8]) {
         if alphas.len() != self.0.len() {
             panic!("Alpha channel must have the same length as the color map")
@@ -102,45 +98,47 @@ impl ColorMap {
     }
 }
 
-pub fn rasterize_tf(points: &[Vector2<f32>], n: u32) -> Vec<u8> {
-    assert!(points.len() >= 2, "spline must have at least 2 points");
-    let mut values = vec![0; n as usize];
-    let mut last_i = 0;
-    let mut current_i = 1;
-    for i in 0..n {
-        let x = i as f32 / (n - 1) as f32;
-        let last = points[last_i];
-        let current = points[current_i];
-        if (last.x - current.x).abs() < 0.5 / n as f32 {
-            values[i as usize] = (last.y * 255.) as u8;
-        } else {
-            let y = last.y + (current.y - last.y) * (x - last.x) / (current.x - last.x);
-            values[i as usize] = (y * 255.) as u8;
-        }
-        if x > points[current_i].x {
-            last_i = current_i;
-            current_i += 1;
-        }
+// i dont no why we need this but it works...
+impl ColorMap for &dyn ColorMap {
+    fn sample(&self, x: f32) -> Vector4<u8> {
+        (*self).sample(x)
     }
-    values
+}
+
+impl ColorMap for ListedColorMap {
+    fn sample(&self, x: f32) -> Vector4<u8> {
+        let n = self.0.len() as f32;
+        let i = (x * n).min(n - 1.0).max(0.0) as usize;
+        self.0[i] // TODO linear interpolation
+    }
+}
+impl<'a> ColorMap for &'a ListedColorMap {
+    fn sample(&self, x: f32) -> Vector4<u8> {
+        let n = self.0.len() as f32;
+        let i = (x * n).min(n - 1.0).max(0.0) as usize;
+        self.0[i] // TODO linear interpolation
+    }
 }
 
 pub struct ColorMapGPU {
     texture: wgpu::Texture,
     bindgroup: wgpu::BindGroup,
-    sampler: wgpu::Sampler,
-    color_map: ColorMap,
+}
+
+pub trait ColorMap {
+    fn sample(&self, x: f32) -> Vector4<u8>;
+
+    fn rasterize(&self, n: usize) -> Vec<Vector4<u8>> {
+        (0..n)
+            .map(|i| self.sample(i as f32 / (n - 1) as f32))
+            .collect()
+    }
 }
 
 impl ColorMapGPU {
-    pub fn new(cmap: ColorMap, device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
-        let (texture, bindgroup, sampler) = Self::create(device, queue, &cmap);
-        Self {
-            texture,
-            bindgroup,
-            sampler,
-            color_map: cmap,
-        }
+    pub fn new(cmap: impl ColorMap, device: &wgpu::Device, queue: &wgpu::Queue, n: u32) -> Self {
+        let (texture, bindgroup) = Self::create(device, queue, cmap, n);
+        Self { texture, bindgroup }
     }
 
     pub fn texture(&self) -> &wgpu::Texture {
@@ -151,21 +149,18 @@ impl ColorMapGPU {
         &self.bindgroup
     }
 
-    pub fn color_map(&self) -> &ColorMap {
-        &self.color_map
-    }
-
     fn create(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        cmap: &ColorMap,
-    ) -> (wgpu::Texture, wgpu::BindGroup, wgpu::Sampler) {
+        cmap: impl ColorMap,
+        n: u32,
+    ) -> (wgpu::Texture, wgpu::BindGroup) {
         let texture = device.create_texture_with_data(
             queue,
             &wgpu::TextureDescriptor {
                 label: Some("cmap texture"),
                 size: Extent3d {
-                    width: cmap.0.len() as u32,
+                    width: n,
                     height: 1,
                     depth_or_array_layers: 1,
                 },
@@ -177,7 +172,7 @@ impl ColorMapGPU {
                 view_formats: &[],
             },
             wgpu::util::TextureDataOrder::LayerMajor,
-            bytemuck::cast_slice(&cmap.0),
+            bytemuck::cast_slice(&cmap.rasterize(n as usize)),
         );
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -203,19 +198,11 @@ impl ColorMapGPU {
                 },
             ],
         });
-        (texture, bindgroup, sampler)
+        (texture, bindgroup)
     }
 
-    pub fn set_color_map(&mut self, cmap: ColorMap, device: &wgpu::Device, queue: &wgpu::Queue) {
-        if self.color_map.values().len() == cmap.values().len() {
-            self.update(queue);
-        } else {
-            let (texture, bindgroup, sampler) = Self::create(device, queue, &cmap);
-            self.texture = texture;
-            self.bindgroup = bindgroup;
-            self.sampler = sampler;
-        }
-        self.color_map = cmap;
+    fn size(&self) -> u32 {
+        return self.texture.size().width;
     }
 
     pub(crate) fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -242,7 +229,7 @@ impl ColorMapGPU {
         })
     }
 
-    fn update(&self, queue: &wgpu::Queue) {
+    pub fn update(&self, queue: &wgpu::Queue, cmap: impl ColorMap) {
         queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: &self.texture,
@@ -250,17 +237,219 @@ impl ColorMapGPU {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            bytemuck::cast_slice(&self.color_map.0),
+            bytemuck::cast_slice(&cmap.rasterize(self.size() as usize)),
             wgpu::ImageDataLayout {
                 offset: 0,
                 bytes_per_row: None,
                 rows_per_image: None,
             },
             wgpu::Extent3d {
-                width: self.color_map.0.len() as u32,
+                width: self.size() as u32,
                 height: 1,
                 depth_or_array_layers: 1,
             },
         );
+    }
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct LinearSegmentedColorMap {
+    /// x, y0,y1
+    #[serde(alias = "red")]
+    pub r: Vec<(f32, f32, f32)>,
+    #[serde(alias = "green")]
+    pub g: Vec<(f32, f32, f32)>,
+    #[serde(alias = "blue")]
+    pub b: Vec<(f32, f32, f32)>,
+    #[serde(alias = "alpha", default = "default_alpha")]
+    pub a: Vec<(f32, f32, f32)>,
+}
+
+fn default_alpha() -> Vec<(f32, f32, f32)> {
+    vec![(0., 1., 1.), (1., 1., 1.)]
+}
+
+impl LinearSegmentedColorMap {
+    pub fn new(
+        r: Vec<(f32, f32, f32)>,
+        g: Vec<(f32, f32, f32)>,
+        b: Vec<(f32, f32, f32)>,
+        a: Vec<(f32, f32, f32)>,
+    ) -> anyhow::Result<Self> {
+        if !Self::check_values(&r) {
+            return Err(anyhow::anyhow!(
+                "x values for red are not in (0,1) or ascending"
+            ));
+        };
+
+        if !Self::check_values(&g) {
+            return Err(anyhow::anyhow!(
+                "x values for red are not in (0,1) or ascending"
+            ));
+        };
+
+        if !Self::check_values(&b) {
+            return Err(anyhow::anyhow!(
+                "x values for red are not in (0,1) or ascending"
+            ));
+        };
+
+        if !Self::check_values(&a) {
+            return Err(anyhow::anyhow!(
+                "x values for red are not in (0,1) or ascending"
+            ));
+        };
+        Ok(Self { r, g, b, a })
+    }
+
+    pub fn from_json<R: Read>(reader: R) -> anyhow::Result<Self> {
+        Ok(serde_json::from_reader(reader)?)
+    }
+
+    fn check_values(v: &Vec<(f32, f32, f32)>) -> bool {
+        let mut last_x = 0.0;
+        for (x, _, _) in v.iter() {
+            if x < &last_x || x > &1.0 || x < &0.0 {
+                return false;
+            }
+            last_x = *x;
+        }
+        return true;
+    }
+    pub fn from_color_map(cmap: impl ColorMap, n: u32) -> Self {
+        let mut r = vec![];
+        let mut g = vec![];
+        let mut b = vec![];
+        let mut a = vec![];
+        for (i, v) in cmap.rasterize(n as usize).iter().enumerate() {
+            let x = i as f32 / (n - 1) as f32;
+            r.push((x, v.x as f32 / 255., v.x as f32 / 255.));
+            g.push((x, v.y as f32 / 255., v.y as f32 / 255.));
+            b.push((x, v.z as f32 / 255., v.z as f32 / 255.));
+            a.push((x, v.w as f32 / 255., v.w as f32 / 255.));
+        }
+
+        // merge neighboring points with the same alpha value
+        merge_neighbours(&mut r);
+        merge_neighbours(&mut g);
+        merge_neighbours(&mut b);
+        merge_neighbours(&mut a);
+
+        Self { r, g, b, a }
+    }
+}
+
+impl ColorMap for &LinearSegmentedColorMap {
+    fn sample(&self, x: f32) -> Vector4<u8> {
+        Vector4::new(
+            (sample_channel(x, &self.r) * 255.) as u8,
+            (sample_channel(x, &self.g) * 255.) as u8,
+            (sample_channel(x, &self.b) * 255.) as u8,
+            (sample_channel(x, &self.a) * 255.) as u8,
+        )
+    }
+}
+impl Hash for LinearSegmentedColorMap {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for c in [&self.r, &self.g, &self.b, &self.a].iter() {
+            c.iter().for_each(|(a, b, c)| {
+                state.write_u32(a.to_bits());
+                state.write_u32(b.to_bits());
+                state.write_u32(c.to_bits())
+            });
+        }
+    }
+}
+
+pub fn rasterize_tf(points: &[(f32, f32, f32)], n: u32) -> Vec<u8> {
+    assert!(points.len() >= 2, "spline must have at least 2 points");
+    let mut values = vec![0; n as usize];
+    let mut last_i = 0;
+    let mut current_i = 1;
+    for i in 0..n {
+        let x = i as f32 / (n - 1) as f32;
+        let last = points[last_i];
+        let current = points[current_i];
+        if (last.0 - current.0).abs() < 0.5 / n as f32 {
+            values[i as usize] = (last.2 * 255.) as u8;
+        } else {
+            let y = last.2 + (current.1 - last.2) * (x - last.0) / (current.0 - last.0);
+            values[i as usize] = (y * 255.) as u8;
+        }
+        if x > points[current_i].0 {
+            last_i = current_i;
+            current_i += 1;
+        }
+    }
+    values
+}
+
+fn sample_channel(x: f32, values: &[(f32, f32, f32)]) -> f32 {
+    for i in 0..values.len() - 1 {
+        let (x0, _, y0) = values[i];
+        let (x1, y1, _) = values[i + 1];
+        if x0 <= x && x <= x1 {
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0);
+        }
+    }
+    return 0.0;
+}
+
+fn merge_neighbours(values: &mut Vec<(f32, f32, f32)>) {
+    let mut i = 1;
+    while i < values.len() - 1 {
+        let (_, y0, y1) = values[i];
+        if y0 == y1 {
+            let y_prev = values[i - 1].2;
+            let y_next = values[i + 1].1;
+            if y_prev == y_next {
+                values.remove(i);
+            } else {
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
+
+pub const COLORMAP_RESOLUTION: u32 = 256;
+
+#[derive(Debug, Clone, Hash)]
+pub enum ColorMapType {
+    Listed(ListedColorMap),
+    LinearSegmented(LinearSegmentedColorMap),
+}
+
+impl ColorMapType {
+    pub fn read<R: Read + Seek>(mut reader: R) -> anyhow::Result<Self> {
+        let mut start = [0; 6];
+        reader.read_exact(&mut start)?;
+        reader.seek(SeekFrom::Start(0))?;
+        if start.eq(b"\x93NUMPY") {
+            // numpy file
+            Ok(ColorMapType::Listed(ListedColorMap::from_npy(reader)?))
+        } else {
+            // json file
+            Ok(ColorMapType::LinearSegmented(
+                LinearSegmentedColorMap::from_json(reader)?,
+            ))
+        }
+    }
+
+    pub fn into_linear_segmented(&self, n: u32) -> LinearSegmentedColorMap {
+        match self {
+            crate::cmap::ColorMapType::Listed(c) => LinearSegmentedColorMap::from_color_map(c, n),
+            crate::cmap::ColorMapType::LinearSegmented(c) => c.clone(),
+        }
+    }
+}
+
+impl<'a> ColorMap for &'a ColorMapType {
+    fn sample(&self, x: f32) -> Vector4<u8> {
+        match self {
+            ColorMapType::Listed(c) => c.sample(x),
+            ColorMapType::LinearSegmented(c) => c.sample(x),
+        }
     }
 }

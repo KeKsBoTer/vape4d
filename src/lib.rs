@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use camera::GenericCamera;
+use cmap::LinearSegmentedColorMap;
 use controller::CameraController;
 use renderer::{RenderSettings, VolumeRenderer};
 use volume::VolumeGPU;
@@ -18,7 +19,7 @@ pub use web::*;
 
 
 use cgmath::{
-    vec3, Deg, EuclideanSpace, InnerSpace,  Point3, Quaternion, Rotation, Vector2, Vector3
+    Deg, Vector2
 };
 // use egui::Color32;
 
@@ -28,16 +29,17 @@ use winit::{
 
 use crate::{
     camera::PerspectiveProjection,
-    cmap::{ColorMap, ColorMapGPU},
+    cmap::{ColorMapGPU, COLORMAP_RESOLUTION},
     volume::Volume,
 };
 
-mod camera;
+pub mod camera;
 pub mod cmap;
 mod controller;
-mod renderer;
+pub mod renderer;
 mod ui;
 mod ui_renderer;
+pub mod offline;
 pub mod volume;
 // pub mod image;
 
@@ -72,7 +74,9 @@ impl WGPUContext {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     required_features,
-                    required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                    required_limits: wgpu::Limits{
+                        max_texture_dimension_3d: 1024,
+                        ..wgpu::Limits::downlevel_webgl2_defaults()},
                     label: None,
                 },
                 None,
@@ -87,6 +91,8 @@ impl WGPUContext {
         }
     }
 }
+
+
 
 pub struct WindowContext {
     wgpu_context: WGPUContext,
@@ -106,7 +112,9 @@ pub struct WindowContext {
     renderer: VolumeRenderer,
 
     render_settings: RenderSettings,
-    cmap: cmap::ColorMapGPU,
+    cmap_gpu: cmap::ColorMapGPU,
+    cmap:LinearSegmentedColorMap,
+
 
     playing:bool,
     animation_duration:Duration,
@@ -126,7 +134,7 @@ impl WindowContext {
     async fn new(
         window: Window,
         volumes: Vec<Volume>,
-        cmap:ColorMap,
+        cmap:LinearSegmentedColorMap,
         render_config: &RenderConfig,
     ) -> anyhow::Result<Self> {
         let mut size = window.inner_size();
@@ -144,7 +152,6 @@ impl WindowContext {
         let wgpu_context = WGPUContext::new(&instance, Some(&surface)).await;
 
         log::info!("device: {:?}", wgpu_context.adapter.get_info().name);
-        log::info!("settings {:?}", render_config);
 
         let device = &wgpu_context.device;
         let queue = &wgpu_context.queue;
@@ -196,23 +203,15 @@ impl WindowContext {
 
         let mut controller = CameraController::new(0.1, 0.05);
         controller.center = volumes[0].aabb.center();
-        let r = volumes[0].aabb.radius();
-        let corner = vec3(1., -1., 1.);
-        let view_dir = Quaternion::look_at(-corner, Vector3::unit_y());
-        let camera = GenericCamera::new(
-            Point3::from_vec(corner.normalize()) * r * 3.,
-            view_dir,
+
+        let camera = GenericCamera::new_aabb_iso(
+            volumes[0].aabb.clone(),
             PerspectiveProjection::new(
                 Vector2::new(size.width, size.height),
                 Deg(45.),
                 0.01,
                 1000.,
             ),
-            // OrthographicProjection::new(
-            //     Vector2::new(size.width as f32, size.height as f32)/200.,
-            //     -100.,
-            //     100.,
-            // ),
         );
 
         let animation_duration = Duration::from_secs_f32(volumes[0].timesteps as f32*0.05);
@@ -220,7 +219,7 @@ impl WindowContext {
         let num_columns =  volumes.len().min(4) as u32;
         let volumes_gpu = volumes.into_iter().map(|v| VolumeGPU::new(device, queue, v)).collect();
 
-        let cmap = ColorMapGPU::new(cmap, device, queue);
+        let cmap_gpu = ColorMapGPU::new(&cmap, device, queue,COLORMAP_RESOLUTION);
         Ok(Self {   
             wgpu_context,
             scale_factor: window.scale_factor() as f32,
@@ -236,6 +235,7 @@ impl WindowContext {
             volumes:volumes_gpu,
             renderer,
             render_settings,
+            cmap_gpu,
             cmap,
             animation_duration,
             playing: true,
@@ -244,7 +244,7 @@ impl WindowContext {
             colormap_editor_visible:render_config.show_colormap_editor,
             volume_info_visible:render_config.show_volume_info,
             #[cfg(not(target_arch = "wasm32"))]
-            cmap_save_path:"cmap.npy".to_string(),
+            cmap_save_path:"cmap.json".to_string(),
             #[cfg(feature = "colormaps")]
             cmap_select_visible:render_config.show_cmap_select,
         })
@@ -327,7 +327,7 @@ impl WindowContext {
                 &self.volumes[selected_channel],
                 &camera,
                 &self.render_settings,
-                &self.cmap
+                &self.cmap_gpu
             ));
         }else{
             for v in &self.volumes{
@@ -338,7 +338,7 @@ impl WindowContext {
                     &v,
                     &camera,
                     &self.render_settings,
-                    &self.cmap
+                    &self.cmap_gpu
                 ));
             }
         }
@@ -392,7 +392,7 @@ impl WindowContext {
 
 
 
-pub async fn open_window(window_builder:WindowBuilder,volumes: Vec<Volume>,cmap: ColorMap,config: RenderConfig) {
+pub async fn open_window(window_builder:WindowBuilder,volumes: Vec<Volume>,cmap: LinearSegmentedColorMap,config: RenderConfig) {
     let event_loop = EventLoop::new().unwrap();
 
 
@@ -403,7 +403,6 @@ pub async fn open_window(window_builder:WindowBuilder,volumes: Vec<Volume>,cmap:
         .with_title(format!("{name} {version}"))
         .build(&event_loop)
         .unwrap();
-    
     
     let mut state = WindowContext::new(window, volumes, cmap,&config).await.unwrap();
 

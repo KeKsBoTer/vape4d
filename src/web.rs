@@ -1,9 +1,15 @@
+use std::io::Read;
+use std::ops::Deref;
+
+use cgmath::Vector2;
 use wasm_bindgen::prelude::wasm_bindgen;
-use wasm_bindgen::JsCast;
+use wasm_bindgen::{JsCast, JsValue};
+use web_sys::js_sys;
 use winit::platform::web::WindowBuilderExtWebSys;
 use winit::window::WindowBuilder;
 
-use crate::cmap::ColorMap;
+use crate::cmap::{self, ColorMapType, COLORMAP_RESOLUTION};
+use crate::offline::render_volume;
 use crate::volume::Volume;
 use crate::{open_window, RenderConfig};
 
@@ -83,7 +89,10 @@ pub async fn viewer_inline(
     let volumes = Volume::load_numpy(reader, true).expect("Failed to load volumes");
 
     let reader_colormap = Cursor::new(colormap);
-    let cmap = ColorMap::from_npy(reader_colormap).unwrap();
+
+    let cmap = ColorMapType::read(reader_colormap)
+        .unwrap()
+        .into_linear_segmented(COLORMAP_RESOLUTION);
 
     let (canvas, spinner) = web_sys::window()
         .and_then(|win| win.document())
@@ -173,7 +182,7 @@ pub async fn viewer_wasm(canvas_id: String) {
             wasm_bindgen_futures::spawn_local(open_window(
                 window_builder,
                 volumes,
-                cmap,
+                cmap.into_linear_segmented(COLORMAP_RESOLUTION),
                 RenderConfig {
                     no_vsync: false,
                     background_color: wgpu::Color::BLACK,
@@ -187,4 +196,43 @@ pub async fn viewer_wasm(canvas_id: String) {
             break;
         }
     }
+}
+
+#[wasm_bindgen]
+pub async fn render_offline(
+    npz_file: Vec<u8>,
+    colormap: Vec<u8>,
+    width: u32,
+    height: u32,
+    time: f32,
+    bg: Color,
+) -> JsValue {
+    use std::io::Cursor;
+    #[cfg(debug_assertions)]
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+    console_log::init().expect("could not initialize logger");
+    let reader = Cursor::new(npz_file);
+    let volumes = Volume::load_numpy(reader, true).expect("Failed to load volumes");
+
+    let reader_colormap = Cursor::new(colormap);
+
+    let cmap = ColorMapType::read(reader_colormap).unwrap();
+
+    let img = render_volume(
+        volumes,
+        cmap,
+        Vector2::new(width, height),
+        time,
+        wgpu::Color {
+            r: bg.r as f64,
+            g: bg.g as f64,
+            b: bg.b as f64,
+            a: bg.a as f64,
+        },
+    )
+    .await
+    .unwrap();
+    let data = img.as_raw().deref();
+    let value: JsValue = js_sys::Uint8Array::from(data).into();
+    return value;
 }
