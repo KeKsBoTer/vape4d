@@ -3,3 +3,15 @@ colormaps/
 **/*.npz
 **/*.npy
 .vscode/
+**/*.so
+**/*.ply
+
+#python
+**/*.pyc
+**/.ipynb_checkpoints
+
+# dev stuff
+cmaps_custom/
+volumes/
+public/*.wasm
+public/*.js

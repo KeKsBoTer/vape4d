@@ -1,11 +1,8 @@
 use clap::Parser;
 use std::{fmt::Debug, fs::File, io::BufReader, path::PathBuf};
-use v4dv::{
-    cmap::{self, COLORMAP_RESOLUTION},
-    open_window,
-    volume::Volume,
-    RenderConfig,
-};
+
+use v4dv::cmap;
+use v4dv::{open_window, volume::Volume, RenderConfig};
 use winit::{dpi::PhysicalSize, window::WindowBuilder};
 
 #[derive(Debug, Parser)]
@@ -41,13 +38,13 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(not(feature = "colormaps"))]
     let cmap = {
         let reader = File::open(&opt.colormap)?;
-        ColorMapType::read(reader)?
+        cmap::ColorMapType::read(reader)?
     };
 
     open_window(
         window_builder,
         volumes,
-        cmap.into_linear_segmented(COLORMAP_RESOLUTION),
+        cmap.into_linear_segmented(cmap::COLORMAP_RESOLUTION),
         RenderConfig {
             no_vsync: opt.no_vsync,
             background_color: wgpu::Color::BLACK,

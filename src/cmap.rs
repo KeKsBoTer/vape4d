@@ -9,6 +9,8 @@ use std::{collections::HashMap, io::Cursor};
 use anyhow::Ok;
 use cgmath::Vector4;
 use npyz::WriterBuilder;
+#[cfg(feature = "python")]
+use numpy::ndarray::{ArrayViewD, Axis};
 use wgpu::{util::DeviceExt, Extent3d};
 
 #[cfg(feature = "colormaps")]
@@ -45,6 +47,22 @@ impl Hash for ListedColorMap {
 impl ListedColorMap {
     pub fn new(values: Vec<Vector4<u8>>) -> Self {
         Self(values)
+    }
+
+    #[cfg(feature = "python")]
+    pub fn from_array(data: ArrayViewD<f32>) -> Self {
+        Self(
+            data.axis_iter(Axis(0))
+                .map(|v| {
+                    Vector4::new(
+                        (v[0] * 255.) as u8,
+                        (v[1] * 255.) as u8,
+                        (v[2] * 255.) as u8,
+                        (v[3] * 255.) as u8,
+                    )
+                })
+                .collect(),
+        )
     }
 
     pub fn from_npy<'a, R>(reader: R) -> anyhow::Result<Self>

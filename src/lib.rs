@@ -41,6 +41,8 @@ mod ui;
 mod ui_renderer;
 pub mod offline;
 pub mod volume;
+#[cfg(feature = "python")]
+pub mod py;
 // pub mod image;
 
 #[derive(Debug)]
@@ -69,14 +71,12 @@ impl WGPUContext {
             .unwrap();
 
         let required_features = wgpu::Features::default();
-
+        
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     required_features,
-                    required_limits: wgpu::Limits{
-                        max_texture_dimension_3d: 1024,
-                        ..wgpu::Limits::downlevel_webgl2_defaults()},
+                    required_limits: adapter.limits(),
                     label: None,
                 },
                 None,

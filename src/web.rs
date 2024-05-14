@@ -1,4 +1,3 @@
-use std::io::Read;
 use std::ops::Deref;
 
 use cgmath::Vector2;
@@ -8,7 +7,7 @@ use web_sys::js_sys;
 use winit::platform::web::WindowBuilderExtWebSys;
 use winit::window::WindowBuilder;
 
-use crate::cmap::{self, ColorMapType, COLORMAP_RESOLUTION};
+use crate::cmap::{ColorMapType, COLORMAP_RESOLUTION};
 use crate::offline::render_volume;
 use crate::volume::Volume;
 use crate::{open_window, RenderConfig};
@@ -161,6 +160,7 @@ pub async fn viewer_wasm(canvas_id: String) {
             Some((canvas, spinner))
         })
         .unwrap();
+
     let size = (canvas.width() as u32, canvas.height() as u32);
     let window_builder = WindowBuilder::new()
         .with_canvas(Some(canvas))

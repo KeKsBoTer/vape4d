@@ -1,0 +1,25 @@
+[project]
+name = "v4dv"
+version = "0.1"
+description = "Volume 4D Visualization"
+readme = "README.md"
+requires-python = ">=3.8"
+keywords = ["4D", "volume", "visualization", "v4dv"]
+authors = [{ name = "Simon Niedermayr" }]
+
+dependencies = ["numpy", "matplotlib"]
+
+[project.optional-dependencies]
+test = ["ipython"]
+
+[project.urls]
+homepage = "https://keksboter.github.io/v4dv"
+repository = "https://github.com/KeKsBoTer/v4dv"
+
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+# "extension-module" tells pyo3 we want to build an extension module (skips linking against libpython.so)
+features = ["pyo3/extension-module", "python"]

@@ -5,6 +5,8 @@ use half::f16;
 use instant::Instant;
 use npyz::{npz, Deserialize, NpyFile};
 use num_traits::Float;
+#[cfg(feature = "python")]
+use numpy::ndarray::ArrayViewD;
 use std::io::{Read, Seek};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
@@ -20,6 +22,31 @@ pub struct Volume {
 }
 
 impl Volume {
+    #[cfg(feature = "python")]
+    pub fn from_array(data: ArrayViewD<f32>) -> Self {
+        let shape = data.shape().to_vec();
+        let resolution = [shape[1] as u32, shape[2] as u32, shape[3] as u32];
+        let vec_data = data.iter().map(|v| f16::from_f32(*v)).collect();
+
+        let res_min = resolution.iter().min().unwrap();
+        let aabb = Aabb {
+            min: Point3::new(0.0, 0.0, 0.0),
+            max: Point3::new(
+                resolution[2] as f32 / *res_min as f32,
+                resolution[1] as f32 / *res_min as f32,
+                resolution[0] as f32 / *res_min as f32,
+            ),
+        };
+        Self {
+            timesteps: shape[0] as u32,
+            resolution: resolution.into(),
+            aabb,
+            min_value: *data.iter().min_by(|a, b| a.total_cmp(b)).unwrap(),
+            max_value: *data.iter().max_by(|a, b| a.total_cmp(b)).unwrap(),
+            data: vec_data,
+        }
+    }
+
     pub fn load_npy<'a, R>(reader: R, time_first: bool) -> anyhow::Result<Vec<Self>>
     where
         R: Read + Seek,
