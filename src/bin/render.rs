@@ -30,6 +30,12 @@ struct Opt {
 
     #[arg(long, short, num_args = 4, default_values_t = [0, 0, 0, 255])]
     background_color: Vec<u8>,
+
+    vmin: Option<f32>,
+    vmax: Option<f32>,
+
+    #[arg(long, default_value = "1")]
+    distance_scale: f32,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -59,8 +65,17 @@ async fn main() -> anyhow::Result<()> {
         a: opt.background_color[3] as f64 / 255.,
     };
 
-    let img =
-        v4dv::offline::render_volume(volumes, cmap, resolution, opt.time, background_color).await?;
+    let img = v4dv::offline::render_volume(
+        volumes,
+        cmap,
+        resolution,
+        opt.time,
+        background_color,
+        opt.vmin,
+        opt.vmax,
+        opt.distance_scale,
+    )
+    .await?;
 
     img.save(opt.img_out)?;
 

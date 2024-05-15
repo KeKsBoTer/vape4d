@@ -15,6 +15,8 @@ img = (
         height=1024,
         vmin=-10,
         vmax=10,
+        background=(0, 255, 0, 255),
+        distance_scale=10,
     ).astype(np.float32)
     / 255
 )

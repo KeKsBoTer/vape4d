@@ -1,14 +1,9 @@
-use std::ops::Deref;
-
-use cgmath::Vector2;
 use wasm_bindgen::prelude::wasm_bindgen;
-use wasm_bindgen::{JsCast, JsValue};
-use web_sys::js_sys;
+use wasm_bindgen::JsCast;
 use winit::platform::web::WindowBuilderExtWebSys;
 use winit::window::WindowBuilder;
 
 use crate::cmap::{ColorMapType, COLORMAP_RESOLUTION};
-use crate::offline::render_volume;
 use crate::volume::Volume;
 use crate::{open_window, RenderConfig};
 
@@ -50,6 +45,7 @@ pub struct InlineViewerConfig {
     // for normalization
     pub vmin: Option<f32>,
     pub vmax: Option<f32>,
+    pub distance_scale: f32,
 }
 
 #[wasm_bindgen]
@@ -62,6 +58,7 @@ impl InlineViewerConfig {
         show_cmap_select: bool,
         vmin: Option<f32>,
         vmax: Option<f32>,
+        distance_scale: f32,
     ) -> Self {
         Self {
             background_color,
@@ -70,6 +67,7 @@ impl InlineViewerConfig {
             show_cmap_select,
             vmin,
             vmax,
+            distance_scale,
         }
     }
 }
@@ -196,47 +194,4 @@ pub async fn viewer_wasm(canvas_id: String) {
             break;
         }
     }
-}
-
-#[wasm_bindgen]
-pub async fn render_offline(
-    npz_file: Vec<u8>,
-    colormap: Vec<u8>,
-    width: u32,
-    height: u32,
-    time: f32,
-    bg: Color,
-    vmin: Option<f32>,
-    vmax: Option<f32>,
-) -> JsValue {
-    use std::io::Cursor;
-    #[cfg(debug_assertions)]
-    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-    console_log::init().expect("could not initialize logger");
-    let reader = Cursor::new(npz_file);
-    let volumes = Volume::load_numpy(reader, true).expect("Failed to load volumes");
-
-    let reader_colormap = Cursor::new(colormap);
-
-    let cmap = ColorMapType::read(reader_colormap).unwrap();
-
-    let img = render_volume(
-        volumes,
-        cmap,
-        Vector2::new(width, height),
-        time,
-        wgpu::Color {
-            r: bg.r as f64,
-            g: bg.g as f64,
-            b: bg.b as f64,
-            a: bg.a as f64,
-        },
-        vmin,
-        vmax,
-    )
-    .await
-    .unwrap();
-    let data = img.as_raw().deref();
-    let value: JsValue = js_sys::Uint8Array::from(data).into();
-    return value;
 }

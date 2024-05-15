@@ -13,9 +13,18 @@ def render(
     background: tuple[float, float, float, float] = (0, 0, 0, 1),
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
+    distance_scale: float = 1.0,
 ):
     colormap_data = cmap(np.linspace(0, 1, 256)).astype(np.float32)
     img = v4dv.render_img(
-        volume, colormap_data, width, height, time, background, vmin, vmax
+        volume,
+        colormap_data,
+        width,
+        height,
+        time,
+        background,
+        distance_scale,
+        vmin,
+        vmax,
     )
     return img

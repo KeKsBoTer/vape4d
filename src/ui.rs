@@ -60,6 +60,21 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         .clamp_range((1e-4)..=(100000.)),
                 );
                 ui.end_row();
+                ui.label("Background Color");
+                let mut bg = [
+                    state.background_color.r as f32,
+                    state.background_color.g as f32,
+                    state.background_color.b as f32,
+                    state.background_color.a as f32,
+                ];
+                ui.color_edit_button_rgba_premultiplied(&mut bg);
+                state.background_color = wgpu::Color {
+                    r: bg[0] as f64,
+                    g: bg[1] as f64,
+                    b: bg[2] as f64,
+                    a: bg[3] as f64,
+                };
+                ui.end_row();
                 if state.volumes.len() > 1 {
                     ui.label("Channel");
                     egui::ComboBox::new("selected_channel", "")

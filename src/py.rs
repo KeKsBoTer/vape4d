@@ -20,6 +20,7 @@ fn v4dv<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
         height: u32,
         time: f32,
         background: (f32, f32, f32, f32),
+        distance_scale: f32,
         vmin: Option<f32>,
         vmax: Option<f32>,
     ) -> Bound<'py, PyArray3<u8>> {
@@ -38,6 +39,7 @@ fn v4dv<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
             },
             vmin,
             vmax,
+            distance_scale,
         ))
         .unwrap();
 

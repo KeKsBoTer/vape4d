@@ -25,3 +25,26 @@ def felix_cmap_hack(cmap: Colormap) -> Colormap:
             "cmap must be either a ListedColormap or a LinearSegmentedColormap"
         )
     return cmap
+
+
+def simon_cmap_hack(cmap: Colormap) -> Colormap:
+    """changes the alpha channel of a colormap to be linear (0->0, 1->1)
+
+    Args:
+        cmap (Colormap): colormap
+
+    Returns:
+        Colormap: new colormap
+    """
+    cmap = cmap.copy()
+    if isinstance(cmap, ListedColormap):
+        cmap.colors = cmap.colors.copy()
+        for i, a in enumerate(cmap.colors):
+            a.append(i / (cmap.N - 1))
+    elif isinstance(cmap, LinearSegmentedColormap):
+        cmap._segmentdata["alpha"] = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+    else:
+        raise TypeError(
+            "cmap must be either a ListedColormap or a LinearSegmentedColormap"
+        )
+    return cmap

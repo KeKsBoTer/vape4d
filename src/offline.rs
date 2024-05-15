@@ -71,6 +71,7 @@ pub async fn render_volume(
     bg: wgpu::Color,
     vmin: Option<f32>,
     vmax: Option<f32>,
+    distance_scale: f32,
 ) -> anyhow::Result<ImageBuffer<Rgba<u8>, Vec<u8>>> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
     let wgpu_context = WGPUContext::new(&instance, None).await;
@@ -104,6 +105,7 @@ pub async fn render_volume(
             time: time,
             vmin,
             vmax,
+            distance_scale,
             ..Default::default()
         },
         bg,

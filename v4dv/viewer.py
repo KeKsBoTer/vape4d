@@ -51,6 +51,7 @@ class ViewerSettings:
     show_volume_info: bool
     vmin: Optional[float]
     vmax: Optional[float]
+    distance_scale: float
 
 
 def viewer(
@@ -63,6 +64,7 @@ def viewer(
     show_volume_info=False,
     vmin=None,
     vmax=None,
+    distance_scale=1.0,
 ):
     return VolumeViewer(
         data,
@@ -75,6 +77,7 @@ def viewer(
             show_volume_info,
             vmin,
             vmax,
+            distance_scale,
         ),
     )
 
