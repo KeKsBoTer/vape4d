@@ -206,6 +206,8 @@ pub async fn render_offline(
     height: u32,
     time: f32,
     bg: Color,
+    vmin: Option<f32>,
+    vmax: Option<f32>,
 ) -> JsValue {
     use std::io::Cursor;
     #[cfg(debug_assertions)]
@@ -229,6 +231,8 @@ pub async fn render_offline(
             b: bg.b as f64,
             a: bg.a as f64,
         },
+        vmin,
+        vmax,
     )
     .await
     .unwrap();

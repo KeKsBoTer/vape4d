@@ -13,8 +13,8 @@ img = (
         0.5,
         width=1024,
         height=1024,
-        vmin=-5,
-        vmax=5,
+        vmin=-10,
+        vmax=10,
     ).astype(np.float32)
     / 255
 )
