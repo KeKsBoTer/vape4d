@@ -20,6 +20,8 @@ fn v4dv<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
         height: u32,
         time: f32,
         background: (f32, f32, f32, f32),
+        vmin: Option<f32>,
+        vmax: Option<f32>,
     ) -> Bound<'py, PyArray3<u8>> {
         let volume = Volume::from_array(volume.as_array());
         let cmap = ListedColorMap::from_array(cmap.as_array());
@@ -34,6 +36,8 @@ fn v4dv<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
                 b: background.2 as f64,
                 a: background.3 as f64,
             },
+            vmin,
+            vmax,
         ))
         .unwrap();
 
