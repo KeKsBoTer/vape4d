@@ -150,7 +150,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         let mut selected_cmap: (String, String) = ui.ctx().data_mut(|d| {
                             d.get_persisted_mut_or(
                                 "selected_cmap".into(),
-                                ("matplotlib".to_string(), "viridis".to_string()),
+                                ("seaborn".to_string(), "icefire".to_string()),
                             )
                             .clone()
                         });

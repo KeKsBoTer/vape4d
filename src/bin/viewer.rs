@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
         .expect("Failed to load volume");
 
     #[cfg(feature = "colormaps")]
-    let cmap = cmap::COLORMAPS["matplotlib"]["viridis"].clone();
+    let cmap = cmap::COLORMAPS["seaborn"]["icefire"].clone();
     #[cfg(not(feature = "colormaps"))]
     let cmap = {
         let reader = File::open(&opt.colormap)?;
