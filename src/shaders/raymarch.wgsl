@@ -196,11 +196,15 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
     return vec4<f32>(color, a);
 }
 
+fn gamma_correction(color: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(pow(color.rgb, vec3<f32>(1. / 2.2)), color.a);
+}
+
 
 @fragment
 fn fs_main(vertex_in: VertexOut) -> @location(0) vec4<f32> {
     let r_pos = vec2<f32>(vertex_in.tex_coord.x, 1. - vertex_in.tex_coord.y);
     let ray = create_ray(camera.view_inv, camera.proj_inv, r_pos);
     var color = trace_ray(ray);
-    return color;
+    return gamma_correction(color);
 }
