@@ -8,6 +8,8 @@ use std::{collections::HashMap, io::Cursor};
 
 use anyhow::Ok;
 use cgmath::Vector4;
+#[cfg(feature = "colormaps")]
+use include_dir::Dir;
 use npyz::WriterBuilder;
 #[cfg(feature = "python")]
 use numpy::ndarray::{ArrayViewD, Axis};
@@ -19,19 +21,36 @@ use once_cell::sync::Lazy;
 #[cfg(feature = "colormaps")]
 use include_dir::include_dir;
 
-// list of predefined colormaps
 #[cfg(feature = "colormaps")]
-pub static COLORMAPS: Lazy<HashMap<String, ColorMapType>> = Lazy::new(|| {
-    let cmaps: HashMap<String, ColorMapType> = include_dir!("colormaps")
+static COLORMAPS_MATPLOTLIB: include_dir::Dir = include_dir!("colormaps/matplotlib");
+#[cfg(feature = "colormaps")]
+static COLORMAPS_SEABORN: include_dir::Dir = include_dir!("colormaps/seaborn");
+#[cfg(feature = "colormaps")]
+static COLORMAPS_CMASHER: include_dir::Dir = include_dir!("colormaps/cmasher");
+
+#[cfg(feature = "colormaps")]
+fn load_cmaps(dir: &Dir) -> HashMap<String, GenericColorMap> {
+    let cmaps: HashMap<String, GenericColorMap> = dir
         .files()
         .filter_map(|f| {
             let file_name = f.path();
             let reader = Cursor::new(f.contents());
             let name = file_name.file_stem().unwrap().to_str().unwrap().to_string();
-            let cmap = ColorMapType::read(reader).unwrap();
+            let cmap = GenericColorMap::read(reader).unwrap();
             return Some((name, cmap));
         })
         .collect();
+    cmaps
+}
+
+// list of predefined colormaps
+#[cfg(feature = "colormaps")]
+pub static COLORMAPS: Lazy<HashMap<String, HashMap<String, GenericColorMap>>> = Lazy::new(|| {
+    let mut cmaps = HashMap::new();
+    cmaps.insert("matplotlib".to_string(), load_cmaps(&COLORMAPS_MATPLOTLIB));
+    cmaps.insert("seaborn".to_string(), load_cmaps(&COLORMAPS_SEABORN));
+    cmaps.insert("cmasher".to_string(), load_cmaps(&COLORMAPS_CMASHER));
+
     cmaps
 });
 
@@ -116,25 +135,18 @@ impl ListedColorMap {
     }
 }
 
-// i dont no why we need this but it works...
-impl ColorMap for &dyn ColorMap {
-    fn sample(&self, x: f32) -> Vector4<u8> {
-        (*self).sample(x)
-    }
-}
-
-impl ColorMap for ListedColorMap {
-    fn sample(&self, x: f32) -> Vector4<u8> {
-        let n = self.0.len() as f32;
-        let i = (x * n).min(n - 1.0).max(0.0) as usize;
-        self.0[i] // TODO linear interpolation
-    }
-}
 impl<'a> ColorMap for &'a ListedColorMap {
+    type Item = ListedColorMap;
     fn sample(&self, x: f32) -> Vector4<u8> {
         let n = self.0.len() as f32;
         let i = (x * n).min(n - 1.0).max(0.0) as usize;
         self.0[i] // TODO linear interpolation
+    }
+
+    fn reverse(&self) -> ListedColorMap {
+        let mut cmap = self.0.clone();
+        cmap.reverse();
+        ListedColorMap::new(cmap)
     }
 }
 
@@ -144,6 +156,7 @@ pub struct ColorMapGPU {
 }
 
 pub trait ColorMap {
+    type Item;
     fn sample(&self, x: f32) -> Vector4<u8>;
 
     fn rasterize(&self, n: usize) -> Vec<Vector4<u8>> {
@@ -151,6 +164,8 @@ pub trait ColorMap {
             .map(|i| self.sample(i as f32 / (n - 1) as f32))
             .collect()
     }
+
+    fn reverse(&self) -> Self::Item;
 }
 
 impl ColorMapGPU {
@@ -279,12 +294,8 @@ pub struct LinearSegmentedColorMap {
     pub g: Vec<(f32, f32, f32)>,
     #[serde(alias = "blue")]
     pub b: Vec<(f32, f32, f32)>,
-    #[serde(alias = "alpha", default = "default_alpha")]
-    pub a: Vec<(f32, f32, f32)>,
-}
-
-fn default_alpha() -> Vec<(f32, f32, f32)> {
-    vec![(0., 1., 1.), (1., 1., 1.)]
+    #[serde(alias = "alpha")]
+    pub a: Option<Vec<(f32, f32, f32)>>,
 }
 
 impl LinearSegmentedColorMap {
@@ -292,7 +303,7 @@ impl LinearSegmentedColorMap {
         r: Vec<(f32, f32, f32)>,
         g: Vec<(f32, f32, f32)>,
         b: Vec<(f32, f32, f32)>,
-        a: Vec<(f32, f32, f32)>,
+        a: Option<Vec<(f32, f32, f32)>>,
     ) -> anyhow::Result<Self> {
         if !Self::check_values(&r) {
             return Err(anyhow::anyhow!(
@@ -302,21 +313,23 @@ impl LinearSegmentedColorMap {
 
         if !Self::check_values(&g) {
             return Err(anyhow::anyhow!(
-                "x values for red are not in (0,1) or ascending"
+                "x values for green are not in (0,1) or ascending"
             ));
         };
 
         if !Self::check_values(&b) {
             return Err(anyhow::anyhow!(
-                "x values for red are not in (0,1) or ascending"
+                "x values for blue are not in (0,1) or ascending"
             ));
         };
 
-        if !Self::check_values(&a) {
-            return Err(anyhow::anyhow!(
-                "x values for red are not in (0,1) or ascending"
-            ));
-        };
+        if let Some(a) = &a {
+            if !Self::check_values(&a) {
+                return Err(anyhow::anyhow!(
+                    "x values for alpha are not in (0,1) or ascending"
+                ));
+            };
+        }
         Ok(Self { r, g, b, a })
     }
 
@@ -353,24 +366,70 @@ impl LinearSegmentedColorMap {
         merge_neighbours(&mut b);
         merge_neighbours(&mut a);
 
-        Self { r, g, b, a }
+        Self {
+            r,
+            g,
+            b,
+            a: Some(a),
+        }
     }
 }
 
 impl ColorMap for &LinearSegmentedColorMap {
+    type Item = LinearSegmentedColorMap;
     fn sample(&self, x: f32) -> Vector4<u8> {
+        let a = self
+            .a
+            .as_ref()
+            .map(|a| sample_channel(x, &a))
+            .unwrap_or(1.0);
         Vector4::new(
             (sample_channel(x, &self.r) * 255.) as u8,
             (sample_channel(x, &self.g) * 255.) as u8,
             (sample_channel(x, &self.b) * 255.) as u8,
-            (sample_channel(x, &self.a) * 255.) as u8,
+            (a * 255.) as u8,
         )
+    }
+    fn reverse(&self) -> Self::Item {
+        let mut r: Vec<_> = self
+            .r
+            .iter()
+            .map(|(x, y1, y2)| (1.0 - x, *y1, *y2))
+            .collect();
+        let mut g: Vec<_> = self
+            .g
+            .iter()
+            .map(|(x, y1, y2)| (1.0 - x, *y1, *y2))
+            .collect();
+        let mut b: Vec<_> = self
+            .b
+            .iter()
+            .map(|(x, y1, y2)| (1.0 - x, *y1, *y2))
+            .collect();
+        let mut a: Option<Vec<(f32, f32, f32)>> = self
+            .a
+            .clone()
+            .map(|a| a.iter().map(|(x, y1, y2)| (1.0 - x, *y1, *y2)).collect());
+        r.reverse();
+        g.reverse();
+        b.reverse();
+        if let Some(a) = &mut a {
+            a.reverse();
+        }
+        LinearSegmentedColorMap { r, g, b, a }
     }
 }
 impl Hash for LinearSegmentedColorMap {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        for c in [&self.r, &self.g, &self.b, &self.a].iter() {
+        for c in [&self.r, &self.g, &self.b].iter() {
             c.iter().for_each(|(a, b, c)| {
+                state.write_u32(a.to_bits());
+                state.write_u32(b.to_bits());
+                state.write_u32(c.to_bits())
+            });
+        }
+        if let Some(a) = &self.a {
+            a.iter().for_each(|(a, b, c)| {
                 state.write_u32(a.to_bits());
                 state.write_u32(b.to_bits());
                 state.write_u32(c.to_bits())
@@ -434,22 +493,22 @@ fn merge_neighbours(values: &mut Vec<(f32, f32, f32)>) {
 pub const COLORMAP_RESOLUTION: u32 = 256;
 
 #[derive(Debug, Clone, Hash)]
-pub enum ColorMapType {
+pub enum GenericColorMap {
     Listed(ListedColorMap),
     LinearSegmented(LinearSegmentedColorMap),
 }
 
-impl ColorMapType {
+impl GenericColorMap {
     pub fn read<R: Read + Seek>(mut reader: R) -> anyhow::Result<Self> {
         let mut start = [0; 6];
         reader.read_exact(&mut start)?;
         reader.seek(SeekFrom::Start(0))?;
         if start.eq(b"\x93NUMPY") {
             // numpy file
-            Ok(ColorMapType::Listed(ListedColorMap::from_npy(reader)?))
+            Ok(GenericColorMap::Listed(ListedColorMap::from_npy(reader)?))
         } else {
             // json file
-            Ok(ColorMapType::LinearSegmented(
+            Ok(GenericColorMap::LinearSegmented(
                 LinearSegmentedColorMap::from_json(reader)?,
             ))
         }
@@ -457,17 +516,41 @@ impl ColorMapType {
 
     pub fn into_linear_segmented(&self, n: u32) -> LinearSegmentedColorMap {
         match self {
-            crate::cmap::ColorMapType::Listed(c) => LinearSegmentedColorMap::from_color_map(c, n),
-            crate::cmap::ColorMapType::LinearSegmented(c) => c.clone(),
+            crate::cmap::GenericColorMap::Listed(c) => {
+                LinearSegmentedColorMap::from_color_map(c, n)
+            }
+            crate::cmap::GenericColorMap::LinearSegmented(c) => c.clone(),
+        }
+    }
+
+    /// if all alpha values are 1.0, the alpha channel is considered boring
+    #[allow(unused)]
+    pub(crate) fn has_boring_alpha_channel(&self) -> bool {
+        match self {
+            GenericColorMap::Listed(c) => c.0.iter().all(|v| v.w == 255),
+            GenericColorMap::LinearSegmented(c) => {
+                c.a.as_ref()
+                    .map(|a| a.iter().all(|(_, _, a)| *a == 1.0))
+                    .unwrap_or(true)
+            }
         }
     }
 }
 
-impl<'a> ColorMap for &'a ColorMapType {
+impl<'a> ColorMap for &'a GenericColorMap {
     fn sample(&self, x: f32) -> Vector4<u8> {
         match self {
-            ColorMapType::Listed(c) => c.sample(x),
-            ColorMapType::LinearSegmented(c) => c.sample(x),
+            GenericColorMap::Listed(c) => c.sample(x),
+            GenericColorMap::LinearSegmented(c) => c.sample(x),
+        }
+    }
+
+    type Item = GenericColorMap;
+
+    fn reverse(&self) -> Self::Item {
+        match self {
+            GenericColorMap::Listed(c) => GenericColorMap::Listed(c.reverse()),
+            GenericColorMap::LinearSegmented(c) => GenericColorMap::LinearSegmented(c.reverse()),
         }
     }
 }

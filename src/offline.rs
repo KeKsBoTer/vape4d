@@ -3,7 +3,7 @@ use image::{ImageBuffer, Rgba};
 
 use crate::{
     camera::{GenericCamera, PerspectiveProjection, Projection},
-    cmap::{ColorMapGPU, ColorMapType, COLORMAP_RESOLUTION},
+    cmap::{ColorMapGPU, GenericColorMap, COLORMAP_RESOLUTION},
     renderer::{RenderSettings, VolumeRenderer},
     volume::{Volume, VolumeGPU},
     WGPUContext,
@@ -65,7 +65,7 @@ async fn render_view<P: Projection>(
 
 pub async fn render_volume(
     volumes: Vec<Volume>,
-    cmap: ColorMapType,
+    cmap: GenericColorMap,
     resolution: Vector2<u32>,
     time: f32,
     bg: wgpu::Color,

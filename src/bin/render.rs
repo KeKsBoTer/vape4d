@@ -2,7 +2,7 @@ use cgmath::Vector2;
 use clap::Parser;
 
 use std::{fs::File, path::PathBuf};
-use v4dv::cmap::ColorMapType;
+use v4dv::cmap::GenericColorMap;
 use v4dv::volume::Volume;
 
 #[derive(Debug, Parser)]
@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
     let volume_file = File::open(&opt.input)?;
     let cmap_file = File::open(opt.colormap)?;
     let volumes = Volume::load_numpy(volume_file, opt.channel_first)?;
-    let cmap = ColorMapType::read(cmap_file)?;
+    let cmap = GenericColorMap::read(cmap_file)?;
 
     let resolution = Vector2::new(opt.width, opt.height);
 

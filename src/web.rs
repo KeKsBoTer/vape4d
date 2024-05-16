@@ -3,7 +3,7 @@ use wasm_bindgen::JsCast;
 use winit::platform::web::WindowBuilderExtWebSys;
 use winit::window::WindowBuilder;
 
-use crate::cmap::{ColorMapType, COLORMAP_RESOLUTION};
+use crate::cmap::{GenericColorMap, COLORMAP_RESOLUTION};
 use crate::volume::Volume;
 use crate::{open_window, RenderConfig};
 
@@ -87,7 +87,7 @@ pub async fn viewer_inline(
 
     let reader_colormap = Cursor::new(colormap);
 
-    let cmap = ColorMapType::read(reader_colormap)
+    let cmap = GenericColorMap::read(reader_colormap)
         .unwrap()
         .into_linear_segmented(COLORMAP_RESOLUTION);
 
@@ -140,7 +140,7 @@ pub async fn viewer_wasm(canvas_id: String) {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     console_log::init().expect("could not initialize logger");
 
-    let cmap = cmap::COLORMAPS.get("viridis").unwrap().clone();
+    let cmap = cmap::COLORMAPS["seaborn"]["icefire"].clone();
 
     let (canvas, spinner): (HtmlCanvasElement, HtmlElement) = web_sys::window()
         .and_then(|win| win.document())

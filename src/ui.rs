@@ -147,37 +147,73 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 if state.cmap_select_visible {
                     ui.horizontal(|ui| {
                         let cmaps = &COLORMAPS;
-                        let mut selected_cmap: String = ui.ctx().data_mut(|d| {
-                            d.get_persisted_mut_or("selected_cmap".into(), "viridis".to_string())
+                        let mut selected_cmap: (String, String) = ui.ctx().data_mut(|d| {
+                            d.get_persisted_mut_or(
+                                "selected_cmap".into(),
+                                ("matplotlib".to_string(), "viridis".to_string()),
+                            )
+                            .clone()
+                        });
+                        let mut search_term: String = ui.ctx().data_mut(|d| {
+                            d.get_temp_mut_or("cmap_search".into(), "".to_string())
                                 .clone()
                         });
                         ui.label("Colormap");
                         let old_selected_cmap = selected_cmap.clone();
                         egui::ComboBox::new("cmap_select", "")
-                            .selected_text(selected_cmap.clone())
+                            .selected_text(selected_cmap.1.clone())
                             .show_ui(ui, |ui| {
-                                let mut keys: Vec<_> = cmaps.iter().collect();
-                                keys.sort_by_key(|e| e.0);
-                                for (name, cmap) in keys {
-                                    let texture = load_or_create(ui, cmap, COLORMAP_RESOLUTION);
-                                    ui.horizontal(|ui| {
-                                        ui.image(egui::ImageSource::Texture(
-                                            egui::load::SizedTexture {
-                                                id: texture,
-                                                size: vec2(50., 10.),
-                                            },
-                                        ));
-                                        ui.selectable_value(&mut selected_cmap, name.clone(), name);
-                                    });
+                                ui.add(
+                                    egui::text_edit::TextEdit::singleline(&mut search_term)
+                                        .hint_text("Search..."),
+                                );
+                                for (group, cmaps) in cmaps.iter() {
+                                    ui.label(group);
+                                    let mut sorted_cmaps: Vec<_> = cmaps.iter().collect();
+                                    sorted_cmaps.sort_by_key(|e| e.0);
+                                    for (name, cmap) in sorted_cmaps {
+                                        if name.contains(&search_term) {
+                                            let texture =
+                                                load_or_create(ui, cmap, COLORMAP_RESOLUTION);
+                                            ui.horizontal(|ui| {
+                                                ui.image(egui::ImageSource::Texture(
+                                                    egui::load::SizedTexture {
+                                                        id: texture,
+                                                        size: vec2(50., 10.),
+                                                    },
+                                                ));
+                                                ui.selectable_value(
+                                                    &mut selected_cmap,
+                                                    (group.clone(), name.clone()),
+                                                    name,
+                                                );
+                                            });
+                                        }
+                                    }
+                                    ui.separator();
                                 }
                             });
                         if old_selected_cmap != selected_cmap {
-                            state.cmap =
-                                cmaps[&selected_cmap].into_linear_segmented(COLORMAP_RESOLUTION);
-
+                            let old_alpha = state.cmap.a.clone();
+                            state.cmap = cmaps[&selected_cmap.0][&selected_cmap.1]
+                                .into_linear_segmented(COLORMAP_RESOLUTION);
+                            if state.cmap.a.is_none()
+                                || cmaps[&selected_cmap.0][&selected_cmap.1]
+                                    .has_boring_alpha_channel()
+                            {
+                                state.cmap.a = old_alpha;
+                            }
                             ui.ctx().data_mut(|d| {
-                                d.insert_persisted("selected_cmap".into(), selected_cmap)
+                                d.insert_persisted("selected_cmap".into(), selected_cmap);
                             });
+                        }
+                        ui.ctx()
+                            .data_mut(|d| d.insert_temp("cmap_search".into(), search_term));
+                        if state.cmap.a.is_none() {
+                            state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (1.0, 1.0, 1.0)]);
+                        }
+                        if ui.button("↔").clicked() {
+                            state.cmap = (&state.cmap).reverse();
                         }
                     });
                 }
@@ -192,11 +228,33 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 show_cmap(ui, egui::Id::new("cmap preview"), &state.cmap, vmin, vmax);
 
                 ui.label("Alpha Channel");
-                if ui.button("felix hack").clicked() {
-                    state.cmap.a = vec![(0.0, 1.0, 1.0), (0.5, 0., 0.), (1.0, 1.0, 1.0)];
-                }
+                ui.end_row();
+                ui.horizontal(|ui| {
+                    ui.label("Presets:");
+                    if ui.button("felix hack").clicked() {
+                        state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (0.5, 0., 0.), (1.0, 1.0, 1.0)]);
+                    }
+                    if ui.button("simon hack").clicked() {
+                        state.cmap.a = Some(vec![(0.0, 0.0, 0.0), (1.0, 1.0, 1.0)]);
+                    }
+                    if ui.button("double felix hack").clicked() {
+                        state.cmap.a = Some(vec![
+                            (0.0, 0.0, 0.0),
+                            (0.25, 1.0, 1.0),
+                            (0.5, 0.0, 0.0),
+                            (0.75, 1.0, 1.0),
+                            (1.0, 0.0, 0.0),
+                        ]);
+                    }
+                    if ui.button("flat").clicked() {
+                        state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (1.0, 1.0, 1.0)]);
+                    }
+                });
+                ui.separator();
 
-                tf_ui(ui, &mut state.cmap.a);
+                if let Some(a) = &mut state.cmap.a {
+                    tf_ui(ui, a);
+                }
                 ui.end_row();
                 #[cfg(not(target_arch = "wasm32"))]
                 ui.horizontal(|ui| {

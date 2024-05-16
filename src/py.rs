@@ -28,7 +28,7 @@ fn v4dv<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
         let cmap = ListedColorMap::from_array(cmap.as_array());
         let img = pollster::block_on(render_volume(
             vec![volume],
-            cmap::ColorMapType::Listed(cmap),
+            cmap::GenericColorMap::Listed(cmap),
             Vector2::new(width, height),
             time,
             wgpu::Color {
