@@ -21,6 +21,7 @@ struct Settings {
     distance_scale: f32,
     vmin: f32,
     vmax: f32,
+    gamma_correction: u32
 }
 
 
@@ -48,22 +49,22 @@ fn intersectAABB(ray: Ray, box_min: vec3<f32>, box_max: vec3<f32>) -> vec2<f32> 
 // ray is created based on view and proj matrix so
 // that it matches the rasterizer used for drawing other stuff
 fn create_ray(view_inv: mat4x4<f32>, proj_inv: mat4x4<f32>, px: vec2<f32>) -> Ray {
-    var start = vec4<f32>((px * 2. - (1.)), 1., 1.);
-    start.y *= -1.;
+    var far = vec4<f32>((px * 2. - (1.)), -1., 1.);
+    far.y *= -1.;
     // depth prepass location
-    var start_w = view_inv * proj_inv * start;
-    start_w /= start_w.w + 1e-4;
+    var far_w = view_inv * proj_inv * far;
+    far_w /= far_w.w + 1e-4;
 
 
-    var end = vec4<f32>((px * 2. - (1.)), -1., 1.);
-    end.y *= -1.;
+    var near = vec4<f32>((px * 2. - (1.)), 1., 1.);
+    near.y *= -1.;
     // depth prepass location
-    var end_w = view_inv * proj_inv * end;
-    end_w /= end_w.w + 1e-4;
+    var near_w = view_inv * proj_inv * near;
+    near_w /= near_w.w + 1e-4;
 
     return Ray(
-        end_w.xyz,
-        -normalize(end_w.xyz - start_w.xyz),
+        near_w.xyz,
+        normalize(far_w.xyz - near_w.xyz),
     );
 }
 
@@ -206,5 +207,17 @@ fn fs_main(vertex_in: VertexOut) -> @location(0) vec4<f32> {
     let r_pos = vec2<f32>(vertex_in.tex_coord.x, 1. - vertex_in.tex_coord.y);
     let ray = create_ray(camera.view_inv, camera.proj_inv, r_pos);
     var color = trace_ray(ray);
-    return gamma_correction(color);
+    if settings.gamma_correction == 1u {
+        color = fromLinear(color);
+    }
+    return color;
+}
+
+
+fn fromLinear(color: vec4<f32>) -> vec4<f32> {
+    let cutoff = color.rgb < vec3<f32>(0.0031308);
+    let higher = vec3<f32>(1.055) * pow(color.rgb, vec3<f32>(1.0 / 2.4)) - 0.055;
+    let lower = color.rgb * 12.92;
+
+    return vec4<f32>(mix(higher, lower, vec3<f32>(cutoff)), color.a);
 }

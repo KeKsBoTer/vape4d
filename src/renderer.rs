@@ -1,5 +1,5 @@
 use crate::{
-    camera::{GenericCamera, Projection, VIEWPORT_Y_FLIP},
+    camera::{Camera, Projection, VIEWPORT_Y_FLIP},
     cmap::ColorMapGPU,
     volume::{Aabb, Volume, VolumeGPU},
 };
@@ -85,7 +85,7 @@ impl VolumeRenderer {
         &mut self,
         device: &wgpu::Device,
         volume: &VolumeGPU,
-        camera: &GenericCamera<P>,
+        camera: &Camera<P>,
         render_settings: &RenderSettings,
         cmap: &'a ColorMapGPU,
     ) -> PerFrameData<'a> {
@@ -264,14 +264,14 @@ impl CameraUniform {
         self.proj_inv_matrix = proj_matrix.invert().unwrap();
     }
 
-    pub fn set_camera(&mut self, camera: &GenericCamera<impl Projection>) {
+    pub fn set_camera(&mut self, camera: &Camera<impl Projection>) {
         self.set_proj_mat(camera.proj_matrix());
         self.set_view_mat(camera.view_matrix());
     }
 }
 
-impl<P: Projection> From<&GenericCamera<P>> for CameraUniform {
-    fn from(camera: &GenericCamera<P>) -> Self {
+impl<P: Projection> From<&Camera<P>> for CameraUniform {
+    fn from(camera: &Camera<P>) -> Self {
         let mut uniform = CameraUniform::default();
         uniform.set_camera(camera);
         uniform
@@ -288,6 +288,7 @@ pub struct RenderSettings {
     pub distance_scale: f32,
     pub vmin: Option<f32>,
     pub vmax: Option<f32>,
+    pub gamma_correction: bool,
 }
 
 impl Default for RenderSettings {
@@ -301,6 +302,7 @@ impl Default for RenderSettings {
             distance_scale: 1.,
             vmin: None,
             vmax: None,
+            gamma_correction: false,
         }
     }
 }
@@ -319,7 +321,7 @@ pub struct RenderSettingsUniform {
     distance_scale: f32,
     vmin: f32,
     vmax: f32,
-    _pad: [u32; 1],
+    gamma_correction: u32,
 }
 
 impl RenderSettingsUniform {
@@ -344,7 +346,7 @@ impl RenderSettingsUniform {
             distance_scale: settings.distance_scale,
             vmin: settings.vmin.unwrap_or(volume.min_value),
             vmax: settings.vmax.unwrap_or(volume.max_value),
-            _pad: [0; 1],
+            gamma_correction: settings.gamma_correction as u32,
         }
     }
 }
@@ -363,7 +365,7 @@ impl Default for RenderSettingsUniform {
             distance_scale: 1.,
             vmin: 0.,
             vmax: 1.,
-            _pad: [0; 1],
+            gamma_correction: 0,
         }
     }
 }

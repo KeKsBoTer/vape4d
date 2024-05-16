@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use winit::keyboard::KeyCode;
 
-use crate::camera::{GenericCamera, Projection};
+use crate::camera::{Camera, OrthographicProjection};
 
 #[derive(Debug)]
 pub struct CameraController {
@@ -104,12 +104,14 @@ impl CameraController {
         self.user_inptut = true;
     }
 
-    pub fn update_camera<P: Projection>(&mut self, camera: &mut GenericCamera<P>, dt: Duration) {
+    pub fn update_camera(&mut self, camera: &mut Camera<OrthographicProjection>, dt: Duration) {
         let dt: f32 = dt.as_secs_f32();
-        let mut dir = camera.position - self.center;
+        let dir = camera.position - self.center;
         let distance = dir.magnitude();
 
-        dir = dir.normalize_to((distance.ln() + self.scroll * dt * 10. * self.speed).exp());
+        let scale = camera.projection.viewport.magnitude();
+        let new_scale = (scale.ln() + self.scroll * dt * 10. * self.speed).exp();
+        camera.projection.viewport = camera.projection.viewport.normalize() * new_scale;
 
         let view_t: Matrix3<f32> = camera.rotation.invert().into();
 
@@ -167,7 +169,6 @@ impl CameraController {
         self.user_inptut = false;
     }
 }
-
 
 fn angle_short(a: Vector3<f32>, b: Vector3<f32>) -> Rad<f32> {
     let angle = a.angle(b);

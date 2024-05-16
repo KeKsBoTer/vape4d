@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use camera::GenericCamera;
+use camera::{Camera, OrthographicProjection};
 use cmap::LinearSegmentedColorMap;
 use controller::CameraController;
 use renderer::{RenderSettings, VolumeRenderer};
@@ -18,17 +18,12 @@ mod web;
 pub use web::*;
 
 
-use cgmath::{
-    Deg, Vector2
-};
-// use egui::Color32;
-
+use cgmath::Vector2;
 use winit::{
     dpi::PhysicalSize, event::{DeviceEvent, ElementState, Event, WindowEvent}, event_loop::EventLoop, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowBuilder}
 };
 
 use crate::{
-    camera::PerspectiveProjection,
     cmap::{ColorMapGPU, COLORMAP_RESOLUTION},
     volume::Volume,
 };
@@ -102,7 +97,7 @@ pub struct WindowContext {
     scale_factor: f32,
 
     controller: CameraController,
-    camera: GenericCamera<PerspectiveProjection>,
+    camera: Camera<OrthographicProjection>,
     ui_renderer: ui_renderer::EguiWGPU,
     ui_visible: bool,
 
@@ -199,19 +194,17 @@ impl WindowContext {
             distance_scale: 1.,
             vmin:render_config.vmin,
             vmax:render_config.vmax,
+            gamma_correction:!surface_format.is_srgb()
         };
 
         let mut controller = CameraController::new(0.1, 0.05);
         controller.center = volumes[0].aabb.center();
 
-        let camera = GenericCamera::new_aabb_iso(
+        let radius = volumes[0].aabb.radius();
+        let ratio = size.width as f32 / size.height as f32;
+        let camera = Camera::new_aabb_iso(
             volumes[0].aabb.clone(),
-            PerspectiveProjection::new(
-                Vector2::new(size.width, size.height),
-                Deg(45.),
-                0.01,
-                1000.,
-            ),
+            OrthographicProjection::new(Vector2::new(ratio,1.)*2.*radius, 1e-4, 100.)
         );
 
         let animation_duration = Duration::from_secs_f32(volumes[0].timesteps as f32*0.05);

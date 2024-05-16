@@ -2,19 +2,18 @@ use cgmath::*;
 
 use crate::volume::Aabb;
 
-pub type PerspectiveCamera = GenericCamera<PerspectiveProjection>;
-#[allow(unused)]
-pub type OrthographicCamera = GenericCamera<OrthographicProjection>;
+pub type PerspectiveCamera = Camera<PerspectiveProjection>;
+pub type OrthographicCamera = Camera<OrthographicProjection>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct GenericCamera<P: Projection> {
+pub struct Camera<P: Projection> {
     pub position: Point3<f32>,
     pub rotation: Quaternion<f32>,
     pub projection: P,
 }
-impl<P: Projection> GenericCamera<P> {
+impl<P: Projection> Camera<P> {
     pub fn new(position: Point3<f32>, rotation: Quaternion<f32>, projection: P) -> Self {
-        GenericCamera {
+        Camera {
             position,
             rotation,
             projection: projection,
@@ -25,7 +24,7 @@ impl<P: Projection> GenericCamera<P> {
         let r = aabb.radius();
         let corner = vec3(1., -1., 1.);
         let view_dir = Quaternion::look_at(-corner, Vector3::unit_y());
-        GenericCamera::new(
+        Camera::new(
             aabb.center() + corner.normalize() * r * 2.8,
             view_dir,
             projection,
@@ -141,34 +140,34 @@ pub fn build_proj(znear: f32, zfar: f32, fov_x: Rad<f32>, fov_y: Rad<f32>) -> Ma
 pub struct OrthographicProjection {
     pub znear: f32,
     pub zfar: f32,
-    pub aspect_ratio: f32,
-    pub height: f32,
+    pub viewport: Vector2<f32>,
 }
 
 impl OrthographicProjection {
     #[allow(unused)]
     pub fn new(viewport: Vector2<f32>, znear: f32, zfar: f32) -> Self {
-        let vr = viewport.x as f32 / viewport.y as f32;
         Self {
-            height: viewport.y as f32,
+            viewport,
             znear,
             zfar,
-            aspect_ratio: vr,
         }
     }
 
-    #[allow(unused)]
     pub fn resize(&mut self, width: u32, height: u32) {
         let ratio = width as f32 / height as f32;
-        self.aspect_ratio = ratio;
+        if width > height {
+            self.viewport.x = self.viewport.y * ratio;
+        } else {
+            self.viewport.y = self.viewport.x / ratio;
+        }
     }
 }
 
 impl Projection for OrthographicProjection {
     fn projection_matrix(&self) -> Matrix4<f32> {
-        let width = self.height * self.aspect_ratio;
+        let width = self.viewport.x;
         let right = width / 2.;
-        let top = self.height / 2.;
+        let top = self.viewport.y / 2.;
 
         let mut p = Matrix4::zero();
         p[0][0] = 1. / right;

@@ -1,4 +1,4 @@
-use std::{ops::RangeInclusive, time::Duration};
+use std::{f32::consts::PI, ops::RangeInclusive, time::Duration};
 
 use egui::{emath::Numeric, epaint::TextShape, vec2};
 use egui_plot::{Plot, PlotImage, PlotPoint};
@@ -229,22 +229,37 @@ pub(crate) fn ui(state: &mut WindowContext) {
 
                 ui.label("Alpha Channel");
                 ui.end_row();
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Presets:");
-                    if ui.button("felix hack").clicked() {
+                    let felix_hack = ui
+                        .button("felix hack")
+                        .on_hover_text("double click for smooth version");
+                    if felix_hack.clicked() {
                         state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (0.5, 0., 0.), (1.0, 1.0, 1.0)]);
                     }
-                    if ui.button("simon hack").clicked() {
-                        state.cmap.a = Some(vec![(0.0, 0.0, 0.0), (1.0, 1.0, 1.0)]);
+                    if felix_hack.double_clicked() {
+                        state.cmap.a =
+                            Some(build_segments(25, |x| ((x * 2. * PI).cos() + 1.) / 2.));
                     }
-                    if ui.button("double felix hack").clicked() {
-                        state.cmap.a = Some(vec![
-                            (0.0, 0.0, 0.0),
-                            (0.25, 1.0, 1.0),
-                            (0.5, 0.0, 0.0),
-                            (0.75, 1.0, 1.0),
-                            (1.0, 0.0, 0.0),
-                        ]);
+                    let simon_hack = ui
+                        .button("simon hack")
+                        .on_hover_text("double click for smooth version");
+                    if simon_hack.clicked() {
+                        state.cmap.a = Some(build_segments(2, |x| (-(x * PI).cos() + 1.) / 2.));
+                    }
+                    if simon_hack.double_clicked() {
+                        state.cmap.a = Some(build_segments(25, |x| (-(x * PI).cos() + 1.) / 2.));
+                    }
+                    let double_felix_hack = ui
+                        .button("double felix hack")
+                        .on_hover_text("double click for smooth version");
+                    if double_felix_hack.clicked() {
+                        state.cmap.a =
+                            Some(build_segments(5, |x| (-(x * 4. * PI).cos() + 1.) / 2.));
+                    }
+                    if double_felix_hack.double_clicked() {
+                        state.cmap.a =
+                            Some(build_segments(25, |x| (-(x * 4. * PI).cos() + 1.) / 2.));
                     }
                     if ui.button("flat").clicked() {
                         state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (1.0, 1.0, 1.0)]);
@@ -261,7 +276,6 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     ui.text_edit_singleline(&mut state.cmap_save_path);
                     if ui.button("Save").clicked() {
                         let file = std::fs::File::create(state.cmap_save_path.clone()).unwrap();
-
                         serde_json::to_writer(file, &state.cmap).unwrap();
                     }
                 });
@@ -527,4 +541,14 @@ fn show_cmap(ui: &mut egui::Ui, id: egui::Id, cmap: impl ColorMap + Hash, vmin: 
     plot.show(ui, |plot_ui| {
         plot_ui.image(image);
     });
+}
+
+fn build_segments<F: Fn(f32) -> f32>(n: usize, f: F) -> Vec<(f32, f32, f32)> {
+    (0..n)
+        .map(|i| {
+            let x = i as f32 / (n as f32 - 1.);
+            let v = f(x);
+            (x, v, v)
+        })
+        .collect()
 }

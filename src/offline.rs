@@ -1,8 +1,8 @@
-use cgmath::{Deg, Vector2};
+use cgmath::Vector2;
 use image::{ImageBuffer, Rgba};
 
 use crate::{
-    camera::{GenericCamera, PerspectiveProjection, Projection},
+    camera::{Camera, OrthographicProjection, Projection},
     cmap::{ColorMapGPU, GenericColorMap, COLORMAP_RESOLUTION},
     renderer::{RenderSettings, VolumeRenderer},
     volume::{Volume, VolumeGPU},
@@ -15,7 +15,7 @@ async fn render_view<P: Projection>(
     renderer: &mut VolumeRenderer,
     volume: &VolumeGPU,
     cmap: &ColorMapGPU,
-    camera: GenericCamera<P>,
+    camera: Camera<P>,
     render_settings: &RenderSettings,
     bg: wgpu::Color,
     resolution: Vector2<u32>,
@@ -89,9 +89,11 @@ pub async fn render_volume(
 
     let mut renderer = VolumeRenderer::new(&device, render_format);
 
-    let camera = GenericCamera::new_aabb_iso(
+    let ratio = resolution.x as f32 / resolution.y as f32;
+    let radius = aabb.radius();
+    let camera = Camera::new_aabb_iso(
         aabb,
-        PerspectiveProjection::new(resolution, Deg(45.), 0.01, 1000.),
+        OrthographicProjection::new(Vector2::new(ratio, 1.) * radius * 2., 0.01, 1000.),
     );
 
     render_view(
