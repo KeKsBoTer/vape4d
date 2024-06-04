@@ -1,19 +1,19 @@
-# v4Dv - Interactive 4D volume visualization
+# vAPE - Interactive 4D volume visualization for APE
 
-ToDo
+![Viewer screenshot](screenshot.png)
 
 ## Installation
 
 with pip
 ```
-pip install git+ssh://git@github.com/KeKsBoTer/v4dv.git@master
+pip install git+ssh://git@github.com/KeKsBoTer/vape.git@master
 ```
 
 ## Usage
 
 **Viewer** (jupyter notebook)
 ```python
-from v4dv import viewer
+from vape import viewer
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -26,7 +26,7 @@ viewer(
 
 **Render Image**
 ```python
-from v4dv import felix_cmap_hack, render
+from vape import felix_cmap_hack, render
 
 colormap = felix_cmap_hack(plt.get_cmap("magma"))
 img = render(

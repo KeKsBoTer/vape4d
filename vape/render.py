@@ -1,7 +1,7 @@
 from typing import Optional
 from matplotlib.colors import Colormap
 import numpy as np
-from . import v4dv
+from . import vape
 
 
 def render(
@@ -16,7 +16,7 @@ def render(
     distance_scale: float = 1.0,
 ):
     colormap_data = cmap(np.linspace(0, 1, 256)).astype(np.float32)
-    img = v4dv.render_img(
+    img = vape.render_img(
         volume,
         colormap_data,
         width,

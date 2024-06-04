@@ -2,10 +2,10 @@ from matplotlib import pyplot as plt
 from PIL import Image
 import numpy as np
 
-from v4dv import felix_cmap_hack, render
+from vape import diverging_alpha, render
 
 
-colormap = felix_cmap_hack(plt.get_cmap("magma"))
+colormap = diverging_alpha(plt.get_cmap("magma"))
 img = (
     render(
         np.load("volumes/diffusion_trj.npz")["trj"][0, :1],

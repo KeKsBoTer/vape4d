@@ -2,8 +2,8 @@ use cgmath::Vector2;
 use clap::Parser;
 
 use std::{fs::File, path::PathBuf};
-use v4dv::cmap::GenericColorMap;
-use v4dv::volume::Volume;
+use vape::cmap::GenericColorMap;
+use vape::volume::Volume;
 
 #[derive(Debug, Parser)]
 #[command(author, version)]
@@ -65,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
         a: opt.background_color[3] as f64 / 255.,
     };
 
-    let img = v4dv::offline::render_volume(
+    let img = vape::offline::render_volume(
         volumes,
         cmap,
         resolution,

@@ -20,7 +20,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
             .striped(true)
             .show(ui, |ui| {
                 if with_animation {
-                    ui.label("Progress");
+                    ui.label("Time");
                     ui.add(
                         egui::Slider::new(&mut state.render_settings.time, (0.)..=(1.))
                             .clamp_to_range(true),
@@ -29,7 +29,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         state.playing = !state.playing;
                     }
                     ui.end_row();
-                    ui.label("Duration");
+                    ui.label("Animation Duration");
                     ui.add(
                         egui::DragValue::from_get_set(|v| {
                             if let Some(v) = v {
@@ -227,12 +227,12 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     .unwrap_or(state.volumes[0].volume.max_value);
                 show_cmap(ui, egui::Id::new("cmap preview"), &state.cmap, vmin, vmax);
 
-                ui.label("Alpha Channel");
+                ui.heading("Alpha Channel");
                 ui.end_row();
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Presets:");
                     let felix_hack = ui
-                        .button("felix hack")
+                        .button("\\/")
                         .on_hover_text("double click for smooth version");
                     if felix_hack.clicked() {
                         state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (0.5, 0., 0.), (1.0, 1.0, 1.0)]);
@@ -242,7 +242,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                             Some(build_segments(25, |x| ((x * 2. * PI).cos() + 1.) / 2.));
                     }
                     let simon_hack = ui
-                        .button("simon hack")
+                        .button("/")
                         .on_hover_text("double click for smooth version");
                     if simon_hack.clicked() {
                         state.cmap.a = Some(build_segments(2, |x| (-(x * PI).cos() + 1.) / 2.));
@@ -251,7 +251,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         state.cmap.a = Some(build_segments(25, |x| (-(x * PI).cos() + 1.) / 2.));
                     }
                     let double_felix_hack = ui
-                        .button("double felix hack")
+                        .button("/\\/\\")
                         .on_hover_text("double click for smooth version");
                     if double_felix_hack.clicked() {
                         state.cmap.a =
@@ -261,14 +261,15 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         state.cmap.a =
                             Some(build_segments(25, |x| (-(x * 4. * PI).cos() + 1.) / 2.));
                     }
-                    if ui.button("flat").clicked() {
+                    if ui.button("-").clicked() {
                         state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (1.0, 1.0, 1.0)]);
                     }
                 });
                 ui.separator();
 
                 if let Some(a) = &mut state.cmap.a {
-                    tf_ui(ui, a);
+                    tf_ui(ui, a)
+                    .on_hover_text("Drag anchor points to change transfer function.\nLeft-Click for new anchor point.\nRight-Click to delete anchor point.");
                 }
                 ui.end_row();
                 #[cfg(not(target_arch = "wasm32"))]

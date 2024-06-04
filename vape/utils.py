@@ -2,7 +2,7 @@ from matplotlib.colors import Colormap, LinearSegmentedColormap, ListedColormap
 import numpy as np
 
 
-def felix_cmap_hack(cmap: Colormap) -> Colormap:
+def diverging_alpha(cmap: Colormap) -> Colormap:
     """changes the alpha channel of a colormap to be diverging (0->1, 0.5 > 0, 1->1)
 
     Args:
@@ -27,7 +27,7 @@ def felix_cmap_hack(cmap: Colormap) -> Colormap:
     return cmap
 
 
-def simon_cmap_hack(cmap: Colormap) -> Colormap:
+def linear_increasing_alpha(cmap: Colormap) -> Colormap:
     """changes the alpha channel of a colormap to be linear (0->0, 1->1)
 
     Args:

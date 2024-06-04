@@ -1,20 +1,20 @@
 [project]
-name = "v4dv"
+name = "vape"
 version = "0.1"
 description = "Volume 4D Visualization"
 readme = "README.md"
 requires-python = ">=3.8"
-keywords = ["4D", "volume", "visualization", "v4dv"]
+keywords = ["4D", "volume", "visualization", "vape"]
 authors = [{ name = "Simon Niedermayr" }]
 
-dependencies = ["numpy", "matplotlib"]
+dependencies = ["numpy", "matplotlib", "seaborn", "cmasher"]
 
 [project.optional-dependencies]
 test = ["ipython"]
 
 [project.urls]
-homepage = "https://keksboter.github.io/v4dv"
-repository = "https://github.com/KeKsBoTer/v4dv"
+homepage = "https://keksboter.github.io/vape"
+repository = "https://github.com/KeKsBoTer/vape"
 
 [build-system]
 requires = ["maturin>=1.0,<2.0"]
