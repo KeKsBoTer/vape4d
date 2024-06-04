@@ -43,7 +43,7 @@ jobs:
           cache: 'pip'
       - name: Generate Colormaps
         run: |
-          pip install -r requirements.txt
+          pip install .
           python colormaps.py
       - name: Build
         run: |
