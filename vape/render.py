@@ -14,6 +14,8 @@ def render(
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
     distance_scale: float = 1.0,
+    spatial_interpolation: str = "linear",
+    temporal_interpolation: str = "linear",
 ):
     colormap_data = cmap(np.linspace(0, 1, 256)).astype(np.float32)
     if isinstance(time, list):
@@ -27,6 +29,8 @@ def render(
             distance_scale,
             vmin,
             vmax,
+            spatial_interpolation,
+            temporal_interpolation,
         )
         return img
     else:
@@ -40,5 +44,7 @@ def render(
             distance_scale,
             vmin,
             vmax,
+            spatial_interpolation,
+            temporal_interpolation,
         )
         return img

@@ -105,6 +105,46 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         ui.end_row();
                     }
                 }
+
+                ui.label("Spatial Interpolation");
+
+                egui::ComboBox::new("spatial_interpolation", "")
+                    .selected_text(match state.render_settings.temporal_filter {
+                        wgpu::FilterMode::Nearest => "Nearest",
+                        wgpu::FilterMode::Linear => "Linear",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut state.render_settings.spatial_filter,
+                            wgpu::FilterMode::Nearest,
+                            "Nearest",
+                        );
+                        ui.selectable_value(
+                            &mut state.render_settings.spatial_filter,
+                            wgpu::FilterMode::Linear,
+                            "Linear",
+                        )
+                    });
+                ui.end_row();
+                ui.label("Temporal Interpolation");
+                egui::ComboBox::new("temporal_interpolation", "")
+                    .selected_text(match state.render_settings.temporal_filter {
+                        wgpu::FilterMode::Nearest => "Nearest",
+                        wgpu::FilterMode::Linear => "Linear",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut state.render_settings.temporal_filter,
+                            wgpu::FilterMode::Nearest,
+                            "Nearest",
+                        );
+                        ui.selectable_value(
+                            &mut state.render_settings.temporal_filter,
+                            wgpu::FilterMode::Linear,
+                            "Linear",
+                        )
+                    });
+                ui.end_row();
             });
     });
 
@@ -265,6 +305,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (1.0, 1.0, 1.0)]);
                     }
                 });
+
                 ui.separator();
 
                 if let Some(a) = &mut state.cmap.a {

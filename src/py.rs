@@ -24,6 +24,8 @@ fn vape<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
         distance_scale: f32,
         vmin: Option<f32>,
         vmax: Option<f32>,
+        spatial_interpolation: Option<String>,
+        temporal_interpolation: Option<String>,
     ) -> Bound<'py, PyArray3<u8>> {
         let volume = Volume::from_array(volume.as_array());
         let cmap = ListedColorMap::from_array(cmap.as_array());
@@ -41,6 +43,12 @@ fn vape<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
             vmin,
             vmax,
             distance_scale,
+            spatial_interpolation
+                .map(|s| parse_interpolation(&s).unwrap())
+                .unwrap_or(wgpu::FilterMode::Linear),
+            temporal_interpolation
+                .map(|s| parse_interpolation(&s).unwrap())
+                .unwrap_or(wgpu::FilterMode::Linear),
         ))
         .unwrap()
         .pop()
@@ -63,6 +71,8 @@ fn vape<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
         distance_scale: f32,
         vmin: Option<f32>,
         vmax: Option<f32>,
+        spatial_interpolation: Option<String>,
+        temporal_interpolation: Option<String>,
     ) -> Bound<'py, PyArray4<u8>> {
         let volume = Volume::from_array(volume.as_array());
         let cmap = ListedColorMap::from_array(cmap.as_array());
@@ -80,6 +90,12 @@ fn vape<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
             vmin,
             vmax,
             distance_scale,
+            spatial_interpolation
+                .map(|s| parse_interpolation(&s).unwrap())
+                .unwrap_or_default(),
+            temporal_interpolation
+                .map(|s| parse_interpolation(&s).unwrap())
+                .unwrap_or_default(),
         ))
         .unwrap();
 
@@ -93,4 +109,12 @@ fn vape<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
     }
 
     Ok(())
+}
+
+fn parse_interpolation(text: &str) -> anyhow::Result<wgpu::FilterMode> {
+    match text.to_lowercase().as_str() {
+        "nearest" => Ok(wgpu::FilterMode::Nearest),
+        "linear" => Ok(wgpu::FilterMode::Linear),
+        _ => Err(anyhow::format_err!("Invalid interpolation mode")),
+    }
 }

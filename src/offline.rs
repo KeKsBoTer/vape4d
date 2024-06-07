@@ -72,6 +72,8 @@ pub async fn render_volume(
     vmin: Option<f32>,
     vmax: Option<f32>,
     distance_scale: f32,
+    spatial_interpolation: wgpu::FilterMode,
+    temporal_interpolation: wgpu::FilterMode,
 ) -> anyhow::Result<Vec<ImageBuffer<Rgba<u8>, Vec<u8>>>> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
     let wgpu_context = WGPUContext::new(&instance, None).await;
@@ -110,6 +112,8 @@ pub async fn render_volume(
                 vmin,
                 vmax,
                 distance_scale,
+                spatial_filter: spatial_interpolation,
+                temporal_filter: temporal_interpolation,
                 ..Default::default()
             },
             bg,
