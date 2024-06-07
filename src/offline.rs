@@ -67,12 +67,12 @@ pub async fn render_volume(
     volumes: Vec<Volume>,
     cmap: GenericColorMap,
     resolution: Vector2<u32>,
-    time: f32,
+    frames: &[f32],
     bg: wgpu::Color,
     vmin: Option<f32>,
     vmax: Option<f32>,
     distance_scale: f32,
-) -> anyhow::Result<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+) -> anyhow::Result<Vec<ImageBuffer<Rgba<u8>, Vec<u8>>>> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
     let wgpu_context = WGPUContext::new(&instance, None).await;
     let device = &wgpu_context.device;
@@ -96,24 +96,29 @@ pub async fn render_volume(
         OrthographicProjection::new(Vector2::new(ratio, 1.) * radius * 2., 0.01, 1000.),
     );
 
-    render_view(
-        device,
-        queue,
-        &mut renderer,
-        &volume_gpu[0],
-        &cmap_gpu,
-        camera,
-        &RenderSettings {
-            time: time,
-            vmin,
-            vmax,
-            distance_scale,
-            ..Default::default()
-        },
-        bg,
-        resolution,
-    )
-    .await
+    let mut images: Vec<ImageBuffer<Rgba<u8>, Vec<u8>>> = Vec::with_capacity(frames.len());
+    for time in frames {
+        let img = render_view(
+            device,
+            queue,
+            &mut renderer,
+            &volume_gpu[0],
+            &cmap_gpu,
+            camera,
+            &RenderSettings {
+                time: *time,
+                vmin,
+                vmax,
+                distance_scale,
+                ..Default::default()
+            },
+            bg,
+            resolution,
+        )
+        .await?;
+        images.push(img);
+    }
+    Ok(images)
 }
 
 pub async fn download_texture(
