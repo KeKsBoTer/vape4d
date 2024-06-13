@@ -271,33 +271,33 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 ui.end_row();
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Presets:");
-                    let felix_hack = ui
+                    let v_hack = ui
                         .button("\\/")
                         .on_hover_text("double click for smooth version");
-                    if felix_hack.clicked() {
+                    if v_hack.clicked() {
                         state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (0.5, 0., 0.), (1.0, 1.0, 1.0)]);
                     }
-                    if felix_hack.double_clicked() {
+                    if v_hack.double_clicked() {
                         state.cmap.a =
                             Some(build_segments(25, |x| ((x * 2. * PI).cos() + 1.) / 2.));
                     }
-                    let simon_hack = ui
+                    let slope_hack = ui
                         .button("/")
                         .on_hover_text("double click for smooth version");
-                    if simon_hack.clicked() {
+                    if slope_hack.clicked() {
                         state.cmap.a = Some(build_segments(2, |x| (-(x * PI).cos() + 1.) / 2.));
                     }
-                    if simon_hack.double_clicked() {
+                    if slope_hack.double_clicked() {
                         state.cmap.a = Some(build_segments(25, |x| (-(x * PI).cos() + 1.) / 2.));
                     }
-                    let double_felix_hack = ui
+                    let double_v_hack = ui
                         .button("/\\/\\")
                         .on_hover_text("double click for smooth version");
-                    if double_felix_hack.clicked() {
+                    if double_v_hack.clicked() {
                         state.cmap.a =
                             Some(build_segments(5, |x| (-(x * 4. * PI).cos() + 1.) / 2.));
                     }
-                    if double_felix_hack.double_clicked() {
+                    if double_v_hack.double_clicked() {
                         state.cmap.a =
                             Some(build_segments(25, |x| (-(x * 4. * PI).cos() + 1.) / 2.));
                     }
