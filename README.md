@@ -26,17 +26,24 @@ viewer(
 
 **Render Image**
 ```python
-from vape import felix_cmap_hack, render
+import numpy as np
+from vape import diverging_alpha, render
+import matplotlib.pyplot as plt
 
-colormap = felix_cmap_hack(plt.get_cmap("magma"))
+colormap = diverging_alpha(plt.get_cmap("magma"))
 img = render(
         # [T,D,H,W]
-        np.random.rand(2,32,32,32),
+        np.random.rand(2,32,32,32).astype(np.float32),
         colormap,
         0.5, # timestep
         width=1024,
         height=1024,
     )
 
+plt.imshow(img)
+plt.axis("off")
+
+plt.savefig("test.png", bbox_inches="tight", pad_inches=0)
+plt.show()
 ```
 
