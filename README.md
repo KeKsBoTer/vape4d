@@ -1,6 +1,12 @@
-# vAPE - Interactive 4D volume visualization for APE
+# vAPE - Interactive 4D volume visualization
 
 ![Viewer screenshot](screenshot.png)
+
+[Burgers](https://en.wikipedia.org/wiki/Burgers%27_equation)            |  [Kuramoto–Sivashinsky](https://en.wikipedia.org/wiki/Kuramoto%E2%80%93Sivashinsky_equation)                              |  [Gray-Scott](https://groups.csail.mit.edu/mac/projects/amorphous/GrayScott/)
+:-------------------------:|:------------------------:|:-------------------------:
+![test](references_3d/burgers_1.webp)  |![test](references_3d/ks.webp)|![test](references_3d/gray_scott.webp)|
+-----
+
 
 ## Installation
 
@@ -8,6 +14,7 @@ with pip
 ```
 pip install git+ssh://git@github.com/KeKsBoTer/vape.git@master
 ```
+
 
 ## Usage
 
