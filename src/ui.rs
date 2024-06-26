@@ -1,5 +1,6 @@
 use std::{f32::consts::PI, ops::RangeInclusive, time::Duration};
 
+use bytemuck::Zeroable;
 use egui::{emath::Numeric, epaint::TextShape, vec2};
 use egui_plot::{Plot, PlotImage, PlotPoint};
 
@@ -20,47 +21,37 @@ pub(crate) fn ui(state: &mut WindowContext) {
             .striped(true)
             .show(ui, |ui| {
                 if with_animation {
-                    ui.label("Time");
-                    ui.add(
-                        egui::Slider::new(&mut state.render_settings.time, (0.)..=(1.))
-                            .clamp_to_range(true),
-                    );
-                    if ui.button(if state.playing { "||" } else { "▶" }).clicked() {
-                        state.playing = !state.playing;
-                    }
-                    ui.end_row();
-                    ui.label("Animation Duration");
-                    ui.add(
-                        egui::DragValue::from_get_set(|v| {
-                            if let Some(v) = v {
-                                state.animation_duration = Duration::from_secs_f64(v);
-                                return v;
-                            } else {
-                                return state.animation_duration.as_secs_f64();
-                            }
-                        })
-                        .suffix("s")
-                        .clamp_range((0.)..=1000.),
-                    );
+                    ui.label("Animation");
+                    // ui.end_row();
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::Slider::new(&mut state.render_settings.time, (0.)..=(1.))
+                                .show_value(false)
+                                .clamp_to_range(true)
+                                .trailing_fill(true)
+                                .handle_shape(style::HandleShape::Rect { aspect_ratio: 0.5 }),
+                        );
+                        if ui.button(if state.playing { "||" } else { "▶" }).clicked() {
+                            state.playing = !state.playing;
+                        }
+                        ui.add(
+                            egui::DragValue::from_get_set(|v| {
+                                if let Some(v) = v {
+                                    state.animation_duration = Duration::from_secs_f64(v);
+                                    return v;
+                                } else {
+                                    return state.animation_duration.as_secs_f64();
+                                }
+                            })
+                            .suffix("s")
+                            .clamp_range((0.)..=1000.),
+                        )
+                        .on_hover_text("Animation Duration");
+                    });
                     ui.end_row();
                 }
 
-                ui.label("Step Size");
-                ui.add(
-                    egui::DragValue::new(&mut state.render_settings.step_size)
-                        .speed(0.01)
-                        .clamp_range((1e-3)..=(0.1)),
-                );
-                ui.end_row();
-
-                ui.label("Distance Scale");
-                ui.add(
-                    egui::DragValue::new(&mut state.render_settings.distance_scale)
-                        .speed(0.01)
-                        .clamp_range((1e-4)..=(100000.)),
-                );
-                ui.end_row();
-                ui.label("Background Color");
+                ui.label("Background");
                 let mut bg = [
                     state.background_color.r as f32,
                     state.background_color.g as f32,
@@ -106,157 +97,208 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     }
                 }
 
-                ui.label("Spatial Interpolation");
-
-                egui::ComboBox::new("spatial_interpolation", "")
-                    .selected_text(match state.render_settings.temporal_filter {
-                        wgpu::FilterMode::Nearest => "Nearest",
-                        wgpu::FilterMode::Linear => "Linear",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut state.render_settings.spatial_filter,
-                            wgpu::FilterMode::Nearest,
-                            "Nearest",
-                        );
-                        ui.selectable_value(
-                            &mut state.render_settings.spatial_filter,
-                            wgpu::FilterMode::Linear,
-                            "Linear",
-                        )
-                    });
-                ui.end_row();
-                ui.label("Temporal Interpolation");
-                egui::ComboBox::new("temporal_interpolation", "")
-                    .selected_text(match state.render_settings.temporal_filter {
-                        wgpu::FilterMode::Nearest => "Nearest",
-                        wgpu::FilterMode::Linear => "Linear",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut state.render_settings.temporal_filter,
-                            wgpu::FilterMode::Nearest,
-                            "Nearest",
-                        );
-                        ui.selectable_value(
-                            &mut state.render_settings.temporal_filter,
-                            wgpu::FilterMode::Linear,
-                            "Linear",
-                        )
-                    });
-                ui.end_row();
+                ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                    ui.add(egui::Label::new("Rendering Modes").wrap(false));
+                });
+                ui.vertical(|ui| {
+                    ui.checkbox(&mut state.render_settings.render_volume, "Volume");
+                    ui.checkbox(&mut state.render_settings.render_iso, "Iso Surface");
+                });
             });
+        CollapsingHeader::new("Advanced").show_unindented(ui, |ui| {
+            Grid::new("settings_advanced")
+                .num_columns(2)
+                .show(ui, |ui| {
+                    ui.label("Step Size").on_hover_text("Distance between sample steps for rendering.\nSmaller values give better quality but are slower.");
+                    ui.add(
+                        egui::DragValue::new(&mut state.render_settings.step_size)
+                            .speed(0.01)
+                            .clamp_range((1e-3)..=(0.1)),
+                    );
+                    ui.end_row();
+                    ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                        ui.add(
+                            egui::Label::new("Interpolation")
+                                .selectable(true)
+                                .wrap(false),
+                        )
+                    });
+                    ui.vertical(|ui| {
+                        if state.volumes[0].volume.timesteps > 1 { 
+                            egui::ComboBox::new("temporal_interpolation", "Time")
+                                .selected_text(match state.render_settings.temporal_filter {
+                                    wgpu::FilterMode::Nearest => "Nearest",
+                                    wgpu::FilterMode::Linear => "Linear",
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut state.render_settings.temporal_filter,
+                                        wgpu::FilterMode::Nearest,
+                                        "Nearest",
+                                    );
+                                    ui.selectable_value(
+                                        &mut state.render_settings.temporal_filter,
+                                        wgpu::FilterMode::Linear,
+                                        "Linear",
+                                    )
+                                });
+
+                            ui.end_row();
+                        }
+
+                        egui::ComboBox::new("spatial_interpolation", "Space")
+                            .selected_text(match state.render_settings.spatial_filter {
+                                wgpu::FilterMode::Nearest => "Nearest",
+                                wgpu::FilterMode::Linear => "Linear",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut state.render_settings.spatial_filter,
+                                    wgpu::FilterMode::Nearest,
+                                    "Nearest",
+                                );
+                                ui.selectable_value(
+                                    &mut state.render_settings.spatial_filter,
+                                    wgpu::FilterMode::Linear,
+                                    "Linear",
+                                )
+                            });
+                        ui.end_row();
+                    });
+                });
+        });
     });
 
     // let mut cmap = state.cmap.clone();
 
-    if state.colormap_editor_visible {
-        egui::Window::new("Transfer Function")
+    if state.colormap_editor_visible && state.render_settings.render_volume {
+        egui::Window::new("Volume Rendering")
             .default_size(vec2(300., 50.))
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("vmin");
-                    let min_b = state
+                Grid::new("settings_volume").num_columns(2).show(ui,|ui|{
+                    ui.label("Density Scale");
+                    ui.add(
+                        egui::DragValue::new(&mut state.render_settings.distance_scale)
+                            .speed(0.01)
+                            .clamp_range((1e-4)..=(100000.)),
+                    );
+                    ui.end_row();
+                    ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                        ui.add(
+                            egui::Label::new("Value Range")
+                                .selectable(true)
+                                .wrap(false),
+                        )
+                    });
+                    ui.vertical(|ui| {
+                        let min_b = state
                         .render_settings
                         .vmin
                         .unwrap_or(state.volumes[0].volume.min_value);
-                    let max_b = state
-                        .render_settings
-                        .vmax
-                        .unwrap_or(state.volumes[0].volume.max_value);
+                        let max_b = state
+                            .render_settings
+                            .vmax
+                            .unwrap_or(state.volumes[0].volume.max_value);
 
-                    let vmin_min = state.volumes[0].volume.min_value.min(min_b);
-                    let vmax_max = state.volumes[0].volume.max_value.max(max_b);
-                    optional_drag(
-                        ui,
-                        &mut state.render_settings.vmin,
-                        Some(vmin_min..=max_b),
-                        Some(0.01),
-                        Some(vmin_min),
-                    );
-                    ui.label("vmax");
-                    optional_drag(
-                        ui,
-                        &mut state.render_settings.vmax,
-                        Some(min_b..=vmax_max),
-                        Some(0.01),
-                        Some(vmax_max),
-                    );
-                });
-                #[cfg(feature = "colormaps")]
-                if state.cmap_select_visible {
-                    ui.horizontal(|ui| {
-                        let cmaps = &COLORMAPS;
-                        let mut selected_cmap: (String, String) = ui.ctx().data_mut(|d| {
-                            d.get_persisted_mut_or(
-                                "selected_cmap".into(),
-                                ("seaborn".to_string(), "icefire".to_string()),
-                            )
-                            .clone()
+                        let vmin_min = state.volumes[0].volume.min_value.min(min_b);
+                        let vmax_max = state.volumes[0].volume.max_value.max(max_b);
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Label::new("Min"));
+                            optional_drag(
+                                ui,
+                                &mut state.render_settings.vmin,
+                                Some(vmin_min..=max_b),
+                                Some(0.01),
+                                Some(vmin_min),
+                            );
                         });
-                        let mut search_term: String = ui.ctx().data_mut(|d| {
-                            d.get_temp_mut_or("cmap_search".into(), "".to_string())
-                                .clone()
+                        ui.horizontal(|ui| {
+                            ui.label("Max");
+                            optional_drag(
+                                ui,
+                                &mut state.render_settings.vmax,
+                                Some(min_b..=vmax_max),
+                                Some(0.01),
+                                Some(vmax_max),
+                            );
                         });
-                        ui.label("Colormap");
-                        let old_selected_cmap = selected_cmap.clone();
-                        egui::ComboBox::new("cmap_select", "")
-                            .selected_text(selected_cmap.1.clone())
-                            .show_ui(ui, |ui| {
-                                ui.add(
-                                    egui::text_edit::TextEdit::singleline(&mut search_term)
-                                        .hint_text("Search..."),
-                                );
-                                for (group, cmaps) in cmaps.iter() {
-                                    ui.label(group);
-                                    let mut sorted_cmaps: Vec<_> = cmaps.iter().collect();
-                                    sorted_cmaps.sort_by_key(|e| e.0);
-                                    for (name, cmap) in sorted_cmaps {
-                                        if name.contains(&search_term) {
-                                            let texture =
-                                                load_or_create(ui, cmap, COLORMAP_RESOLUTION);
-                                            ui.horizontal(|ui| {
-                                                ui.image(egui::ImageSource::Texture(
-                                                    egui::load::SizedTexture {
-                                                        id: texture,
-                                                        size: vec2(50., 10.),
-                                                    },
-                                                ));
-                                                ui.selectable_value(
-                                                    &mut selected_cmap,
-                                                    (group.clone(), name.clone()),
-                                                    name,
-                                                );
-                                            });
-                                        }
-                                    }
-                                    ui.separator();
-                                }
-                            });
-                        if old_selected_cmap != selected_cmap {
-                            let old_alpha = state.cmap.a.clone();
-                            state.cmap = cmaps[&selected_cmap.0][&selected_cmap.1]
-                                .into_linear_segmented(COLORMAP_RESOLUTION);
-                            if state.cmap.a.is_none()
-                                || cmaps[&selected_cmap.0][&selected_cmap.1]
-                                    .has_boring_alpha_channel()
-                            {
-                                state.cmap.a = old_alpha;
-                            }
-                            ui.ctx().data_mut(|d| {
-                                d.insert_persisted("selected_cmap".into(), selected_cmap);
-                            });
-                        }
-                        ui.ctx()
-                            .data_mut(|d| d.insert_temp("cmap_search".into(), search_term));
-                        if state.cmap.a.is_none() {
-                            state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (1.0, 1.0, 1.0)]);
-                        }
-                        if ui.button("↔").clicked() {
-                            state.cmap = (&state.cmap).reverse();
-                        }
                     });
-                }
+                    ui.end_row();
+                    #[cfg(feature = "colormaps")]
+                    if state.cmap_select_visible {
+                        ui.label("Colormap");
+                        ui.horizontal(|ui| {
+                            let cmaps = &COLORMAPS;
+                            let mut selected_cmap: (String, String) = ui.ctx().data_mut(|d| {
+                                d.get_persisted_mut_or(
+                                    "selected_cmap".into(),
+                                    ("seaborn".to_string(), "icefire".to_string()),
+                                )
+                                .clone()
+                            });
+                            let mut search_term: String = ui.ctx().data_mut(|d| {
+                                d.get_temp_mut_or("cmap_search".into(), "".to_string())
+                                    .clone()
+                            });
+                            let old_selected_cmap = selected_cmap.clone();
+                            egui::ComboBox::new("cmap_select", "")
+                                .selected_text(selected_cmap.1.clone())
+                                .show_ui(ui, |ui| {
+                                    ui.add(
+                                        egui::text_edit::TextEdit::singleline(&mut search_term)
+                                            .hint_text("Search..."),
+                                    );
+                                    for (group, cmaps) in cmaps.iter() {
+                                        ui.label(group);
+                                        let mut sorted_cmaps: Vec<_> = cmaps.iter().collect();
+                                        sorted_cmaps.sort_by_key(|e| e.0);
+                                        for (name, cmap) in sorted_cmaps {
+                                            if name.contains(&search_term) {
+                                                let texture =
+                                                    load_or_create(ui, cmap, COLORMAP_RESOLUTION);
+                                                ui.horizontal(|ui| {
+                                                    ui.image(egui::ImageSource::Texture(
+                                                        egui::load::SizedTexture {
+                                                            id: texture,
+                                                            size: vec2(50., 10.),
+                                                        },
+                                                    ));
+                                                    ui.selectable_value(
+                                                        &mut selected_cmap,
+                                                        (group.clone(), name.clone()),
+                                                        name,
+                                                    );
+                                                });
+                                            }
+                                        }
+                                        ui.separator();
+                                    }
+                                });
+                            if old_selected_cmap != selected_cmap {
+                                let old_alpha = state.cmap.a.clone();
+                                state.cmap = cmaps[&selected_cmap.0][&selected_cmap.1]
+                                    .into_linear_segmented(COLORMAP_RESOLUTION);
+                                if state.cmap.a.is_none()
+                                    || cmaps[&selected_cmap.0][&selected_cmap.1]
+                                        .has_boring_alpha_channel()
+                                {
+                                    state.cmap.a = old_alpha;
+                                }
+                                ui.ctx().data_mut(|d| {
+                                    d.insert_persisted("selected_cmap".into(), selected_cmap);
+                                });
+                            }
+                            ui.ctx()
+                                .data_mut(|d| d.insert_temp("cmap_search".into(), search_term));
+                            if state.cmap.a.is_none() {
+                                state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (1.0, 1.0, 1.0)]);
+                            }
+                            if ui.button("↔").clicked() {
+                                state.cmap = (&state.cmap).reverse();
+                            }
+                        });
+                    }
+                });
                 let vmin = state
                     .render_settings
                     .vmin
@@ -265,85 +307,143 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     .render_settings
                     .vmax
                     .unwrap_or(state.volumes[0].volume.max_value);
+                ui.add(egui::Label::new(egui::RichText::new("Preview").strong()));
+                ui.end_row();
                 show_cmap(ui, egui::Id::new("cmap preview"), &state.cmap, vmin, vmax);
+                CollapsingHeader::new("Alpha Editor").default_open(true).show_unindented(ui, |ui| {
+                    ui.end_row();
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Presets:");
+                        let v_hack = ui
+                            .button("\\/")
+                            .on_hover_text("double click for smooth version");
+                        if v_hack.clicked() {
+                            state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (0.5, 0., 0.), (1.0, 1.0, 1.0)]);
+                        }
+                        if v_hack.double_clicked() {
+                            state.cmap.a =
+                                Some(build_segments(25, |x| ((x * 2. * PI).cos() + 1.) / 2.));
+                        }
+                        let slope_hack = ui
+                            .button("/")
+                            .on_hover_text("double click for smooth version");
+                        if slope_hack.clicked() {
+                            state.cmap.a = Some(build_segments(2, |x| (-(x * PI).cos() + 1.) / 2.));
+                        }
+                        if slope_hack.double_clicked() {
+                            state.cmap.a = Some(build_segments(25, |x| (-(x * PI).cos() + 1.) / 2.));
+                        }
+                        let double_v_hack = ui
+                            .button("/\\/\\")
+                            .on_hover_text("double click for smooth version");
+                        if double_v_hack.clicked() {
+                            state.cmap.a =
+                                Some(build_segments(5, |x| (-(x * 4. * PI).cos() + 1.) / 2.));
+                        }
+                        if double_v_hack.double_clicked() {
+                            state.cmap.a =
+                                Some(build_segments(25, |x| (-(x * 4. * PI).cos() + 1.) / 2.));
+                        }
+                        if ui.button("-").clicked() {
+                            state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (1.0, 1.0, 1.0)]);
+                        }
+                    });
 
-                ui.heading("Alpha Channel");
-                ui.end_row();
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Presets:");
-                    let v_hack = ui
-                        .button("\\/")
-                        .on_hover_text("double click for smooth version");
-                    if v_hack.clicked() {
-                        state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (0.5, 0., 0.), (1.0, 1.0, 1.0)]);
+                    ui.separator();
+
+                    if let Some(a) = &mut state.cmap.a {
+                        tf_ui(ui, a)
+                        .on_hover_text("Drag anchor points to change transfer function.\nLeft-Click for new anchor point.\nRight-Click to delete anchor point.");
                     }
-                    if v_hack.double_clicked() {
-                        state.cmap.a =
-                            Some(build_segments(25, |x| ((x * 2. * PI).cos() + 1.) / 2.));
-                    }
-                    let slope_hack = ui
-                        .button("/")
-                        .on_hover_text("double click for smooth version");
-                    if slope_hack.clicked() {
-                        state.cmap.a = Some(build_segments(2, |x| (-(x * PI).cos() + 1.) / 2.));
-                    }
-                    if slope_hack.double_clicked() {
-                        state.cmap.a = Some(build_segments(25, |x| (-(x * PI).cos() + 1.) / 2.));
-                    }
-                    let double_v_hack = ui
-                        .button("/\\/\\")
-                        .on_hover_text("double click for smooth version");
-                    if double_v_hack.clicked() {
-                        state.cmap.a =
-                            Some(build_segments(5, |x| (-(x * 4. * PI).cos() + 1.) / 2.));
-                    }
-                    if double_v_hack.double_clicked() {
-                        state.cmap.a =
-                            Some(build_segments(25, |x| (-(x * 4. * PI).cos() + 1.) / 2.));
-                    }
-                    if ui.button("-").clicked() {
-                        state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (1.0, 1.0, 1.0)]);
-                    }
+                    ui.end_row();
+                    ui.separator();
+                    #[cfg(not(target_arch = "wasm32"))]
+                    ui.horizontal(|ui| {
+                        ui.text_edit_singleline(&mut state.cmap_save_path);
+                        if ui.button("Save to File").clicked() {
+                            let file = std::fs::File::create(state.cmap_save_path.clone()).unwrap();
+                            serde_json::to_writer(file, &state.cmap).unwrap();
+                        }
+                    });
                 });
 
-                ui.separator();
-
-                if let Some(a) = &mut state.cmap.a {
-                    tf_ui(ui, a)
-                    .on_hover_text("Drag anchor points to change transfer function.\nLeft-Click for new anchor point.\nRight-Click to delete anchor point.");
-                }
-                ui.end_row();
-                #[cfg(not(target_arch = "wasm32"))]
-                ui.horizontal(|ui| {
-                    ui.text_edit_singleline(&mut state.cmap_save_path);
-                    if ui.button("Save").clicked() {
-                        let file = std::fs::File::create(state.cmap_save_path.clone()).unwrap();
-                        serde_json::to_writer(file, &state.cmap).unwrap();
-                    }
-                });
             });
     }
     state
         .cmap_gpu
         .update(&state.wgpu_context.queue, &state.cmap);
 
+    if state.render_settings.render_iso {
+        egui::Window::new("Iso Surface Rendering")
+            .default_size(vec2(300., 50.))
+            .show(ctx, |ui: &mut Ui| {
+                egui::Grid::new("iso_surface_settings")
+                    .num_columns(2)
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label("Threshold");
+                        ui.add(
+                            egui::DragValue::new(&mut state.render_settings.iso_threshold)
+                                .clamp_range(
+                                    state.volumes[0].volume.min_value
+                                        ..=state.volumes[0].volume.max_value, // TODO use all volume for vmin vmax
+                                )
+                                .speed(0.1),
+                        );
+                        ui.end_row();
+
+                        ui.label("Color");
+                        color_edit_button_rgb(ui, &mut state.render_settings.iso_diffuse_color);
+                        ui.end_row();
+                    });
+
+                ui.collapsing("Advanced", |ui| {
+                    egui::Grid::new("iso_surface_settings_advanced")
+                        .num_columns(2)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("Shininess");
+                            ui.add(
+                                egui::DragValue::new(&mut state.render_settings.iso_shininess)
+                                    .clamp_range((0.)..=1e6),
+                            );
+                            ui.end_row();
+
+                            ui.label("Ambient Color");
+                            color_edit_button_rgb(ui, &mut state.render_settings.iso_ambient_color);
+                            ui.end_row();
+
+                            ui.label("Specular Color");
+                            color_edit_button_rgb(
+                                ui,
+                                &mut state.render_settings.iso_specular_color,
+                            );
+                            ui.end_row();
+
+                            ui.label("Light Color");
+                            color_edit_button_rgb(ui, &mut state.render_settings.iso_light_color);
+                            ui.end_row();
+                        });
+                });
+            });
+    }
     if state.volume_info_visible {
         egui::Window::new("Volume Info").show(ctx, |ui| {
             egui::Grid::new("volume_info")
                 .num_columns(2)
                 .striped(true)
                 .show(ui, |ui| {
-                    ui.label("timesteps");
+                    ui.label("Timesteps");
                     ui.label(state.volumes[0].volume.timesteps.to_string());
                     ui.end_row();
-                    ui.label("channels");
+                    ui.label("Channels");
                     ui.label(state.volumes.len().to_string());
                     ui.end_row();
-                    ui.label("resolution");
+                    ui.label("Resolution");
                     let res = state.volumes[0].volume.resolution;
-                    ui.label(format!("{}x{}x{} (WxDxH)", res.x, res.y, res.z));
+                    ui.label(format!("{}x{}x{} (WxHxD)", res.x, res.y, res.z));
                     ui.end_row();
-                    ui.label("value range");
+                    ui.label("Value range");
                     ui.label(format!(
                         "[{} , {}]",
                         state.volumes[0].volume.min_value, state.volumes[0].volume.max_value
@@ -574,6 +674,7 @@ fn show_cmap(ui: &mut egui::Ui, id: egui::Id, cmap: impl ColorMap + Hash, vmin: 
         .height(100.)
         .show_background(false)
         .show_grid(false)
+        .set_margin_fraction(Vec2::zeroed())
         .custom_y_axes(vec![])
         .allow_boxed_zoom(false)
         .allow_double_click_reset(false)
@@ -593,4 +694,13 @@ fn build_segments<F: Fn(f32) -> f32>(n: usize, f: F) -> Vec<(f32, f32, f32)> {
             (x, v, v)
         })
         .collect()
+}
+
+pub fn color_edit_button_rgb(ui: &mut Ui, rgb: &mut Vector3<f32>) -> Response {
+    let mut rgba = Rgba::from_rgb(rgb[0], rgb[1], rgb[2]);
+    let response = color_picker::color_edit_button_rgba(ui, &mut rgba, color_picker::Alpha::Opaque);
+    rgb[0] = rgba[0];
+    rgb[1] = rgba[1];
+    rgb[2] = rgba[2];
+    response
 }

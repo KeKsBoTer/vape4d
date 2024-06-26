@@ -14,9 +14,6 @@ struct Opt {
     #[arg(long, default_value_t = false)]
     no_vsync: bool,
 
-    #[arg(long, default_value_t = false)]
-    channel_first: bool,
-
     #[cfg(not(feature = "colormaps"))]
     colormap: PathBuf,
 }
@@ -30,8 +27,7 @@ async fn main() -> anyhow::Result<()> {
 
     let window_builder = WindowBuilder::new().with_inner_size(PhysicalSize::new(800, 600));
 
-    let volumes = Volume::load_numpy(BufReader::new(data_file), !opt.channel_first)
-        .expect("Failed to load volume");
+    let volumes = Volume::load(BufReader::new(data_file)).expect("Failed to load volume");
 
     #[cfg(feature = "colormaps")]
     let cmap = cmap::COLORMAPS["seaborn"]["icefire"].clone();

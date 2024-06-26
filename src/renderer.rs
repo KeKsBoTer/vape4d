@@ -4,7 +4,7 @@ use crate::{
     volume::{Aabb, Volume, VolumeGPU},
 };
 
-use cgmath::{EuclideanSpace, Matrix4, SquareMatrix, Vector4, Zero};
+use cgmath::{EuclideanSpace, Matrix4, SquareMatrix, Vector3, Vector4, Zero};
 use wgpu::util::DeviceExt;
 
 pub struct VolumeRenderer {
@@ -64,6 +64,7 @@ impl VolumeRenderer {
             label: Some("volume sampler"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
+
             ..Default::default()
         });
         let sampler_nearest = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -277,7 +278,6 @@ impl<P: Projection> From<&Camera<P>> for CameraUniform {
         uniform
     }
 }
-
 #[derive(Debug, Clone)]
 pub struct RenderSettings {
     pub clipping_aabb: Option<Aabb<f32>>,
@@ -289,6 +289,16 @@ pub struct RenderSettings {
     pub vmin: Option<f32>,
     pub vmax: Option<f32>,
     pub gamma_correction: bool,
+
+    pub render_volume: bool,
+    pub render_iso: bool,
+    pub iso_shininess: f32,
+    pub iso_threshold: f32,
+
+    pub iso_ambient_color: Vector3<f32>,
+    pub iso_specular_color: Vector3<f32>,
+    pub iso_light_color: Vector3<f32>,
+    pub iso_diffuse_color: Vector3<f32>,
 }
 
 impl Default for RenderSettings {
@@ -303,6 +313,14 @@ impl Default for RenderSettings {
             vmin: None,
             vmax: None,
             gamma_correction: false,
+            render_volume: true,
+            render_iso: false,
+            iso_shininess: 20.0,
+            iso_threshold: 0.5,
+            iso_ambient_color: Vector3::zero(),
+            iso_specular_color: Vector3::new(0.7, 0.7, 0.7),
+            iso_light_color: Vector3::new(1., 1., 1.),
+            iso_diffuse_color: Vector3::new(0.8, 0.8, 0.8),
         }
     }
 }
@@ -314,16 +332,27 @@ pub struct RenderSettingsUniform {
     volume_aabb_max: Vector4<f32>,
     clipping_min: Vector4<f32>,
     clipping_max: Vector4<f32>,
+
     time: f32,
     time_steps: u32,
     step_size: f32,
     temporal_filter: u32,
+
     distance_scale: f32,
     vmin: f32,
     vmax: f32,
     gamma_correction: u32,
-}
 
+    iso_ambient_color: Vector4<f32>,
+    iso_specular_color: Vector4<f32>,
+    iso_light_color: Vector4<f32>,
+    iso_diffuse_color: Vector4<f32>,
+
+    render_volume: u32,
+    render_iso: u32,
+    iso_shininess: f32,
+    iso_threshold: f32,
+}
 impl RenderSettingsUniform {
     pub fn from_settings(settings: &RenderSettings, volume: &Volume) -> Self {
         let volume_aabb = volume.aabb;
@@ -347,6 +376,14 @@ impl RenderSettingsUniform {
             vmin: settings.vmin.unwrap_or(volume.min_value),
             vmax: settings.vmax.unwrap_or(volume.max_value),
             gamma_correction: settings.gamma_correction as u32,
+            render_volume: settings.render_volume as u32,
+            render_iso: settings.render_iso as u32,
+            iso_shininess: settings.iso_shininess,
+            iso_threshold: settings.iso_threshold,
+            iso_ambient_color: settings.iso_ambient_color.extend(0.),
+            iso_specular_color: settings.iso_specular_color.extend(0.),
+            iso_light_color: settings.iso_light_color.extend(0.),
+            iso_diffuse_color: settings.iso_diffuse_color.extend(0.),
         }
     }
 }
@@ -366,6 +403,15 @@ impl Default for RenderSettingsUniform {
             vmin: 0.,
             vmax: 1.,
             gamma_correction: 0,
+            render_volume: 1,
+            render_iso: 0,
+            iso_shininess: 20.0,
+            iso_threshold: 0.5,
+            iso_ambient_color: Vector4::zero(),
+
+            iso_specular_color: Vector4::new(1., 1., 1., 0.),
+            iso_light_color: Vector4::new(1., 1., 1., 0.),
+            iso_diffuse_color: Vector4::new(0.5, 0.5, 0.5, 0.),
         }
     }
 }

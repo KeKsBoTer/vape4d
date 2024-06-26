@@ -3,6 +3,7 @@ use cgmath::{BaseNum, EuclideanSpace, MetricSpace, Point3, Vector3, Zero};
 use half::f16;
 #[cfg(target_arch = "wasm32")]
 use instant::Instant;
+use nifti::{InMemNiftiObject, NiftiObject, NiftiVolume};
 use npyz::{npz, Deserialize, NpyFile};
 use num_traits::Float;
 #[cfg(feature = "python")]
@@ -47,22 +48,22 @@ impl Volume {
         }
     }
 
-    pub fn load_npy<'a, R>(reader: R, time_first: bool) -> anyhow::Result<Vec<Self>>
+    pub fn load_npy<'a, R>(reader: R) -> anyhow::Result<Vec<Self>>
     where
         R: Read + Seek,
     {
         let array = NpyFile::new(reader)?;
-        Self::read(array, time_first)
+        Self::read(array)
     }
 
-    pub fn read_dyn<'a, R, P>(array: NpyFile<R>, time_first: bool) -> anyhow::Result<Vec<Self>>
+    pub fn read_dyn<'a, R, P>(array: NpyFile<R>) -> anyhow::Result<Vec<Self>>
     where
         R: Read,
         P: Into<f64> + Deserialize,
     {
         let start = Instant::now();
-        let time_dim = if time_first { 0 } else { 1 };
-        let channel_dim = if time_first { 1 } else { 0 };
+        let time_dim = 0;
+        let channel_dim = 1;
         let timesteps = array.shape()[time_dim] as usize;
         let channels = array.shape()[channel_dim] as usize;
         log::debug!("size: {:?}", array.shape());
@@ -88,17 +89,11 @@ impl Volume {
             if v32 < min_value {
                 min_value = v32;
             }
-            let (c, idx) = if time_first {
-                let t = i / strides[0] as usize;
-                let c = (i - strides[0] as usize * t) / strides[1] as usize;
-                let idx = t * numel + (i - strides[0] as usize * t - strides[1] as usize * c);
-                (c, idx)
-            } else {
-                let c = i / strides[0] as usize;
-                let t = (i - strides[0] as usize * c) / strides[1] as usize;
-                let idx = t * numel + (i - strides[0] as usize * c - strides[1] as usize * t);
-                (c, idx)
-            };
+
+            let t = i / strides[0] as usize;
+            let c = (i - strides[0] as usize * t) / strides[1] as usize;
+            let idx = t * numel + (i - strides[0] as usize * t - strides[1] as usize * c);
+
             volumes[c][idx] = v;
         }
 
@@ -130,26 +125,26 @@ impl Volume {
         Ok(results)
     }
 
-    pub fn read<'a, R>(array: NpyFile<R>, time_first: bool) -> anyhow::Result<Vec<Self>>
+    pub fn read<'a, R>(array: NpyFile<R>) -> anyhow::Result<Vec<Self>>
     where
         R: Read,
     {
         match array.dtype() {
             npyz::DType::Plain(d) => match d.type_char() {
                 npyz::TypeChar::Float => match d.num_bytes().unwrap() {
-                    2 => Self::read_dyn::<_, f16>(array, time_first),
-                    4 => Self::read_dyn::<_, f32>(array, time_first),
-                    8 => Self::read_dyn::<_, f64>(array, time_first),
+                    2 => Self::read_dyn::<_, f16>(array),
+                    4 => Self::read_dyn::<_, f32>(array),
+                    8 => Self::read_dyn::<_, f64>(array),
                     _ => anyhow::bail!("unsupported type {:}", d),
                 },
                 npyz::TypeChar::Uint => match d.num_bytes().unwrap() {
-                    1 => Self::read_dyn::<_, u8>(array, time_first),
-                    2 => Self::read_dyn::<_, u16>(array, time_first),
+                    1 => Self::read_dyn::<_, u8>(array),
+                    2 => Self::read_dyn::<_, u16>(array),
                     _ => anyhow::bail!("unsupported type {:}", d),
                 },
                 npyz::TypeChar::Int => match d.num_bytes().unwrap() {
-                    1 => Self::read_dyn::<_, i8>(array, time_first),
-                    2 => Self::read_dyn::<_, i16>(array, time_first),
+                    1 => Self::read_dyn::<_, i8>(array),
+                    2 => Self::read_dyn::<_, i16>(array),
                     _ => anyhow::bail!("unsupported type {:}", d),
                 },
                 _ => anyhow::bail!("unsupported type {:}", d),
@@ -157,23 +152,31 @@ impl Volume {
             d => anyhow::bail!("unsupported type {:}", d.descr()),
         }
     }
-    pub fn load_numpy<'a, R>(mut reader: R, time_first: bool) -> anyhow::Result<Vec<Self>>
+    pub fn load<'a, R>(mut reader: R) -> anyhow::Result<Vec<Self>>
     where
         R: Read + Seek,
     {
         let mut buffer = [0; 4];
         reader.read_exact(&mut buffer)?;
-        reader.seek(std::io::SeekFrom::Current(-4))?;
         let is_npz = buffer == *b"\x50\x4B\x03\x04";
 
+        reader.seek(std::io::SeekFrom::Start(344))?;
+        reader.read_exact(&mut buffer)?;
+        let is_nifti = buffer == *b"\x6E\x2B\x31\x00";
+        reader.seek(std::io::SeekFrom::Start(0))?;
+
+        if is_nifti {
+            return Self::load_nifti(reader);
+        }
+
         if is_npz {
-            Self::load_npz(reader, time_first)
+            Self::load_npz(reader)
         } else {
-            Self::load_npy(reader, time_first)
+            Self::load_npy(reader)
         }
     }
 
-    pub fn load_npz<'a, R>(reader: R, time_first: bool) -> anyhow::Result<Vec<Self>>
+    pub fn load_npz<'a, R>(reader: R) -> anyhow::Result<Vec<Self>>
     where
         R: Read + Seek,
     {
@@ -184,7 +187,67 @@ impl Volume {
             .ok_or(anyhow::format_err!("no array present"))?
             .to_string();
         let array = reader.by_name(arr_name.as_str())?.unwrap();
-        Self::read(array, time_first)
+        Self::read(array)
+    }
+
+    pub fn load_nifti<'a, R>(reader: R) -> anyhow::Result<Vec<Self>>
+    where
+        R: Read + Seek,
+    {
+        let obj = InMemNiftiObject::from_reader(reader)?;
+        // use obj
+        let volume = obj.into_volume();
+        let shape = volume.dim().to_vec();
+        let dim = volume.dimensionality();
+
+        let data = volume.into_nifti_typed_data::<f64>()?;
+
+        let min_value = data.iter().fold(f64::MAX, |a, &b| a.min(b)) as f32;
+        let mut max_value = data.iter().fold(f64::MIN, |a, &b| a.max(b)) as f32;
+        if min_value == max_value {
+            max_value = min_value + 1.0;
+        }
+        let res_min = shape.iter().min().unwrap();
+
+        let aabb = Aabb {
+            min: Point3::new(0.0, 0.0, 0.0),
+            max: Point3::new(
+                shape[0] as f32 / *res_min as f32,
+                shape[1] as f32 / *res_min as f32,
+                shape[2] as f32 / *res_min as f32,
+            ),
+        };
+
+        match dim {
+            3 => {
+                log::info!("volume shape is: {:?}, interpreted as [WxHxD]", shape);
+
+                return Ok(vec![Self {
+                    timesteps: 1,
+                    resolution: Vector3::new(shape[2] as u32, shape[1] as u32, shape[0] as u32),
+                    aabb,
+                    min_value,
+                    max_value,
+                    data: data.iter().map(|v| f16::from_f64(*v)).collect(),
+                }]);
+            }
+            4 => {
+                log::info!("volume shape is: {:?}, interpreted as [TxWxHxD]", shape);
+                return Ok(vec![Self {
+                    timesteps: 1,
+                    resolution: Vector3::new(shape[2] as u32, shape[1] as u32, shape[0] as u32),
+                    aabb,
+                    min_value,
+                    max_value,
+                    data: data.iter().map(|v| f16::from_f64(*v)).collect(),
+                }]);
+            }
+            5 => {
+                log::info!("volume shape is: {:?}, interpreted as [TxCxWxHxD]", shape);
+                todo!("implement 5D volume");
+            }
+            _ => return Err(anyhow::format_err!("unsupported dimensionality: {}", dim)),
+        }
     }
 }
 

@@ -83,7 +83,7 @@ pub async fn viewer_inline(
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     console_log::init().expect("could not initialize logger");
     let reader = Cursor::new(npz_file);
-    let volumes = Volume::load_numpy(reader, true).expect("Failed to load volumes");
+    let volumes = Volume::load(reader).expect("Failed to load volumes");
 
     let reader_colormap = Cursor::new(colormap);
 
@@ -174,7 +174,7 @@ pub async fn viewer_wasm(canvas_id: String) {
             spinner.set_attribute("style", "display:flex;").unwrap();
             let data = reader.read().await;
             let reader_v = Cursor::new(data);
-            let volumes = Volume::load_numpy(reader_v, true).expect("Failed to load volumes");
+            let volumes = Volume::load(reader_v).expect("Failed to load volumes");
 
             spinner.set_attribute("style", "display:none;").unwrap();
             wasm_bindgen_futures::spawn_local(open_window(

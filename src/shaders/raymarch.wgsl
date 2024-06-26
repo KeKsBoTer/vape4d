@@ -4,6 +4,9 @@ const FILTER_LINEAR:u32 = 1;
 const PI:f32 = 3.1415926535897932384626433832795;
 const TWO_PI:f32 = 6.283185307179586476925286766559;
 
+
+const ISO_IRRADI_PERP: f32 = 1.0;
+
 struct CameraUniforms {
     view: mat4x4<f32>,
     view_inv: mat4x4<f32>,
@@ -14,14 +17,26 @@ struct CameraUniforms {
 struct Settings {
     volume_aabb: Aabb,
     clipping: Aabb,
+
     time: f32,
     time_steps: u32,
     step_size: f32,
     temporal_filter: u32,
+    
     distance_scale: f32,
     vmin: f32,
     vmax: f32,
-    gamma_correction: u32
+    gamma_correction: u32,
+    
+    @align(16) @size(16) iso_ambient_color: vec3<f32>,
+    @align(16) @size(16) iso_specular_color: vec3<f32>,
+    @align(16) @size(16) iso_light_color: vec3<f32>,
+    @align(16) @size(16) iso_diffuse_color: vec3<f32>,
+
+    render_mode_volume: u32, // use volume rendering
+    render_mode_iso: u32, // use iso rendering
+    iso_shininess: f32,
+    iso_threshold: f32,
 }
 
 
@@ -105,15 +120,23 @@ fn vs_main(
 }
 
 // performs a step and returns the NDC cooidinate for the volume sampling
-fn next_pos(pos: ptr<function,vec3<f32>>, step_size: f32, ray_dir: vec3<f32>) -> vec4<f32> {
+fn next_pos(pos: ptr<function,vec3<f32>>, step_size: f32, ray_dir: vec3<f32>) -> vec3<f32> {
     let aabb = settings.volume_aabb;
     let aabb_size = aabb.max - aabb.min;
     let sample_pos = ((*pos) - aabb.min) / aabb_size;
     *pos += ray_dir * step_size;
-    return vec4<f32>(
-        sample_pos,
-        step_size,
-    );
+    return sample_pos;
+}
+
+fn sample_volume_gradient(pos: vec3<f32>) -> vec3<f32> {
+    let size = vec3<f32>(textureDimensions(volume));
+    let dx = vec3<f32>(1. / size.x, 0., 0.) * 2.;
+    let dy = vec3<f32>(0., 1. / size.y, 0.) * 2.;
+    let dz = vec3<f32>(0., 0., 1. / size.z) * 2.;
+    let grad_x = (sample_volume(pos + dx / 2.) - sample_volume(pos - dx / 2.));
+    let grad_y = (sample_volume(pos + dy / 2.) - sample_volume(pos - dy / 2.));
+    let grad_z = (sample_volume(pos + dz / 2.) - sample_volume(pos - dz / 2.));
+    return vec3<f32>(grad_x, grad_y, grad_z);
 }
 
 fn sample_volume(pos: vec3<f32>) -> f32 {
@@ -133,6 +156,16 @@ fn sample_cmap(value: f32) -> vec4<f32> {
     let value_n = (value - settings.vmin) / (settings.vmax - settings.vmin);
     return textureSampleLevel(cmap, cmap_sampler, vec2<f32>(value_n, 0.5), 0.);
 }
+
+
+fn phongBRDF(lightDir: vec3<f32>, viewDir: vec3<f32>, normal: vec3<f32>, phongDiffuseCol: vec3<f32>, phongSpecularCol: vec3<f32>, phongShininess: f32) -> vec3<f32> {
+    var color = phongDiffuseCol;
+    let reflectDir = reflect(-lightDir, normal);
+    let specDot = max(dot(reflectDir, viewDir), 0.0);
+    color += pow(specDot, phongShininess) * phongSpecularCol;
+    return color;
+}
+
 
 
 // traces ray trough volume and returns color
@@ -166,32 +199,81 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
 
     let early_stopping_t = 1. / 255.;
     let step_size_g = settings.step_size;
-    var sample_pos: vec4<f32>;
+    var sample_pos: vec3<f32> = next_pos(&pos, 0., ray.dir);
+    var last_sample_pos = sample_pos;
+    var last_sample = sample_volume(last_sample_pos);
+
+    // used for iso surface rendering
+    var first = true;
+    var sign = 1.;
     loop{
+
         sample_pos = next_pos(&pos, step_size_g, ray.dir);
-        let step_size = sample_pos.w;
+        let step_size = step_size_g;
 
-        let sample = sample_volume(sample_pos.xyz);
-        let color_tf = sample_cmap(sample);
-        let sigma = color_tf.a;
 
-        if sigma > 0. {
-            var sample_color = color_tf.rgb;
-            let a_i = log(1. / (1. - sigma + 1e-4)) * step_size * distance_scale;
-            color += exp(-transmittance) * (1. - exp(-a_i)) * sample_color;
-            transmittance += a_i;
+        let sample = sample_volume(sample_pos);
 
-            if exp(-transmittance) <= early_stopping_t {
+        if bool(settings.render_mode_iso) {
+            let iso_threshold = settings.iso_threshold;
+            let new_sign = sign(sample - iso_threshold);
+
+            if sign != new_sign && !first {
+                let t = (iso_threshold - last_sample) / (sample - last_sample + 1e-4);
+                let intersection = mix(last_sample_pos, sample_pos.xyz, t);
+
+                let gradient = sample_volume_gradient(intersection);
+                let n = -sign * normalize(gradient);
+                let light_dir = normalize(ray.dir + vec3<f32>(0.1));
+                let view_dir = ray.dir;
+
+                let diffuse_color = settings.iso_diffuse_color;
+                let ambient_color = settings.iso_ambient_color;
+                let specular_color = settings.iso_specular_color;
+                let shininess = settings.iso_shininess;
+                let light_color = settings.iso_light_color;
+                let irradi_perp = ISO_IRRADI_PERP;
+
+
+                var radiance = ambient_color;
+
+                let irradiance = max(dot(light_dir, n), 0.0) * irradi_perp;
+                if irradiance > 0.0 {
+                    let brdf = phongBRDF(light_dir, view_dir, n, diffuse_color, specular_color, shininess);
+                    radiance += brdf * irradiance * light_color;
+                }
+
+                color = mix(color, radiance, exp(-transmittance));
+                transmittance = 1e6;
                 break;
+            }
+
+            first = false;
+            sign = new_sign;
+        }
+        if bool(settings.render_mode_volume) {
+            let color_tf = sample_cmap(sample);
+            let sigma = color_tf.a;
+            if sigma > 0. {
+                var sample_color = color_tf.rgb;
+                let a_i = log(1. / (1. - sigma + 1e-4)) * step_size * distance_scale;
+                color += exp(-transmittance) * (1. - exp(-a_i)) * sample_color;
+                transmittance += a_i;
+
+                if exp(-transmittance) <= early_stopping_t {
+                    break;
+                }
             }
         }
         // check if within slice
-        let slice_test = any(sample_pos.xyz < settings.clipping.min) || any(sample_pos.xyz > settings.clipping.max) ;
+        let slice_test = any(sample_pos < settings.clipping.min) || any(sample_pos > settings.clipping.max) ;
 
         if slice_test || iters > 10000 {
             break;
         }
         iters += 1u;
+        last_sample = sample;
+        last_sample_pos = sample_pos;
     }
     let a = 1. - exp(-transmittance);
     return vec4<f32>(color, a);

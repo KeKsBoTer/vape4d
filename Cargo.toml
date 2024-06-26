@@ -41,6 +41,7 @@ include_dir = { version = "0.7.3", optional = true }
 pyo3 = { version = "0.21.2", features = ["extension-module"], optional = true }
 numpy = { version = "0.21", optional = true }
 
+nifti = { version = "0.16.0" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster = { version = "0.3.0", features = ["macro"] }
@@ -56,6 +57,7 @@ wasm-bindgen-futures = "0.4.42"
 console_log = "1"
 log = "0.4"
 instant = { version = "0.1.12", features = ["wasm-bindgen"] }
+
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-cli = "0.2.92"
