@@ -13,7 +13,7 @@ from IPython.display import DisplayObject
 VAPE_URL = os.environ.get("VAPE_URL", "https://keksboter.github.io/vape4d")
 
 
-TEMPLATE_IFRAME = """
+_TEMPLATE_IFRAME = """
     <div>
         <iframe id="{canvas_id}" src="{viewer_url}/index.html?inline" width="{canvas_width}" height="{canvas_height}" frameBorder="0" sandbox="allow-same-origin allow-scripts"></iframe>
     </div>
@@ -103,7 +103,7 @@ class VolumeViewer(DisplayObject):
         cmap_code = base64.b64encode(buffer2.getvalue())
 
         canvas_id = f"vape4d_canvas_{str(random.randint(0,2**32))}"
-        html_code = TEMPLATE_IFRAME.format(
+        html_code = _TEMPLATE_IFRAME.format(
             canvas_id=canvas_id,
             data_code=data_code.decode("utf-8"),
             cmap_code=cmap_code.decode("utf-8"),
