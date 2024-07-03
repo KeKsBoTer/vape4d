@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
 
 permissions:
   contents: read
@@ -39,18 +42,9 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --features colormaps --features python --bindings pyo3 --out dist_lib --find-interpreter
+          args: --release --features colormaps --features python --bindings pyo3 --out dist --find-interpreter
           sccache: 'true'
           manylinux: auto
-      - name: Build wheels (bin)
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --features colormaps --features python --bindings bin --out dist_bin --find-interpreter
-          sccache: 'true'
-          manylinux: auto
-      - name: Bundle wheels
-        run: bash merge_wheels.sh dist_lib dist_bin dist
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -83,18 +77,9 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --features colormaps --features python --bindings pyo3 --out dist_lib --find-interpreter
+          args: --release --features colormaps --features python --bindings pyo3 --out dist --find-interpreter
           sccache: 'true'
           manylinux: musllinux_1_2
-      - name: Build wheels (bin)
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --features colormaps --features python --bindings bin --out dist_bin --find-interpreter
-          sccache: 'true'
-          manylinux: musllinux_1_2
-      - name: Bundle wheels
-        run: bash merge_wheels.sh dist_lib dist_bin dist
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -116,24 +101,12 @@ jobs:
         with:
           python-version: 3.x
           architecture: ${{ matrix.platform.target }}
-      - name: Generate Colormaps
-        run: |
-          pip install matplotlib numpy seaborn cmasher
-          python colormaps.py
       - name: Build wheels (lib)
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --features colormaps --features python --bindings pyo3 --out dist_lib --find-interpreter
+          args: --release --features python --bindings pyo3 --out dist --find-interpreter
           sccache: 'true'
-      - name: Build wheels (bin)
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --features colormaps --features python --bindings bin --out dist_bin --find-interpreter
-          sccache: 'true'
-      - name: Bundle wheels
-        run: bash merge_wheels.sh dist_lib dist_bin dist
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -162,16 +135,8 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --features colormaps --features python --bindings pyo3 --out dist_lib --find-interpreter
+          args: --release --features colormaps --features python --bindings pyo3 --out dist --find-interpreter
           sccache: 'true'
-      - name: Build wheels (bin)
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --features colormaps --features python --bindings bin --out dist_bin --find-interpreter
-          sccache: 'true'
-      - name: Bundle wheels
-        run: bash merge_wheels.sh dist_lib dist_bin dist
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
