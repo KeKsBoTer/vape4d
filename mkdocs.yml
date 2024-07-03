@@ -78,3 +78,6 @@ plugins:
 
 nav:
     - 'index.md'
+    - Examples:
+        - Introductory:
+            - Advection 3D: 'examples/advection_example.ipynb'
