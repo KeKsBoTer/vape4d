@@ -1,5 +1,7 @@
 # Viewer
 
+Interactive Volume Rendering in an iPython environment.
+
 ::: vape4d.viewer
 
 ---

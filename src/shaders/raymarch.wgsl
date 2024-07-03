@@ -156,7 +156,7 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
 
     var iters = 0u;
     var color = vec3<f32>(0.);
-    var transmittance = 0.;
+    var transmittance = 1.;
 
     let volume_size = textureDimensions(volume);
 
@@ -173,13 +173,14 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
 
         let sample = sample_volume(sample_pos.xyz);
         let color_tf = sample_cmap(sample);
-        let sigma = color_tf.a;
+        // we try to avoid values that are exactly one as this can cause artifacts
+        let sigma = color_tf.a * (1. - 1e-6);
 
         if sigma > 0. {
             var sample_color = color_tf.rgb;
-            let a_i = log(1. / (1. - sigma + 1e-4)) * step_size * distance_scale;
-            color += exp(-transmittance) * (1. - exp(-a_i)) * sample_color;
-            transmittance += a_i;
+            let a_i = 1. - pow(1. - sigma, step_size * distance_scale);
+            color += transmittance * a_i * sample_color;
+            transmittance *= 1. - a_i;
 
             if exp(-transmittance) <= early_stopping_t {
                 break;
