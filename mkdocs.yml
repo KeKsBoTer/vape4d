@@ -74,10 +74,14 @@ plugins:
                     members_order: source  # order methods according to their order of definition in the source code, not alphabetical order
                     heading_level: 4
                     show_symbol_type_heading: true
-                    docstring_style: null
+                    docstring_style: google
 
 nav:
     - 'index.md'
     - Examples:
         - Introductory:
             - Advection 3D: 'examples/advection_example.ipynb'
+    - API:
+        - Viewer: 'api/viewer.md'
+        - Render: 'api/render.md'
+        - Utils: 'api/utils.md'
