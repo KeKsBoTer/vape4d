@@ -1,3 +1,4 @@
+from copy import deepcopy
 from matplotlib.colors import Colormap, LinearSegmentedColormap, ListedColormap
 import numpy as np
 
@@ -13,7 +14,7 @@ def diverging_alpha(cmap: Colormap) -> Colormap:
     """
     cmap = cmap.copy()
     if isinstance(cmap, ListedColormap):
-        cmap.colors = cmap.colors.copy()
+        cmap.colors = deepcopy(cmap.colors)
         for i, a in enumerate(cmap.colors):
             a.append(2 * abs(i / cmap.N - 0.5))
     elif isinstance(cmap, LinearSegmentedColormap):
