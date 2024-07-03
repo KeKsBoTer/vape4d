@@ -7,8 +7,9 @@ set -e
 TMPDIR="build_tmp"
 
 # Grab Info
-file_name_lib=$(basename $(/bin/ls "$1"/*.whl))
-file_name_bin=$(basename $(/bin/ls "$2"/*.whl))
+file_name_lib=$(basename "$(ls "$1"/*.whl)")
+file_name_bin=$(basename "$(ls "$2"/*.whl)")
+echo $file_name_bin
 dist_info=$(unzip -qql "$1/*.whl" | grep "\.dist-info/METADATA" | awk '{print $4}' | cut -d/ -f1)
 name_version=$(basename -s '.dist-info' $dist_info)
 
@@ -25,5 +26,7 @@ cat "$1/RECORD" "$2/RECORD" | sort | uniq > "$TMPDIR/$name_version.dist-info/REC
 # Create the wheel
 
 mkdir -p "$3"
-zip -qr "$3/$file_name_lib" $TMPDIR
+cd "$TMPDIR"
+zip -qr "../$3/$file_name_lib" *
+cd ..
 rm -rf "$TMPDIR"

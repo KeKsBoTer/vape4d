@@ -1,5 +1,11 @@
 # vAPE - Interactive 4D volume visualization
 
+[![PyPI](https://img.shields.io/pypi/v/vape4d.svg)](https://pypi.org/project/vape4d/)
+[![Docs](https://img.shields.io/badge/docs-mkdocs-blue)
+](https://keksboter.github.io/vape4d/docs/)
+
+[👉 Click to run the web app 👈](https://keksboter.github.io/vape4d)
+
 ![Viewer screenshot](https://raw.githubusercontent.com/KeKsBoTer/vape4d/master/screenshot.png)
 
 [Burgers](https://en.wikipedia.org/wiki/Burgers%27_equation)            |  [Kuramoto–Sivashinsky](https://en.wikipedia.org/wiki/Kuramoto%E2%80%93Sivashinsky_equation)                              |  [Gray-Scott](https://groups.csail.mit.edu/mac/projects/amorphous/GrayScott/)
