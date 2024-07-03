@@ -7,10 +7,11 @@ Real-time rendering for time-variying volumes (4D = 3D Space + Time) written in 
 
 **TLDR**: We map the values in the volume to RGBA color with a user defined transfer function (colormap) and use standard volume rendering.
 
-![Volume Rendering](img/volume_rendering.svg)
+![Volume Rendering](img/volume_rendering_light.svg#only-light)
+![Volume Rendering](img/volume_rendering_dark.svg#only-dark)
 
 ## Rendering Technique
-The rendering techniques used for volume rendering rely heavily on methods described in the book [Real-Time Volume Graphics](http://www.real-time-volume-graphics.org/).
+The rendering techniques used for volume rendering rely heavily on methods described in the book [Real-Time Volume Graphics](http://www.real-time-volume-graphics.org/).f
 
 A user defined transfer function $f$ is used that maps a value $\hat{v_i}\in[0,1]$ to RGBA color:   
 
@@ -21,7 +22,7 @@ For each pixel we march along a ray with step size $\delta$. At each step the vo
 
 $\hat{v_i} = \min(\max(\frac{v_i -v_\textrm{min}}{v_\textrm{max}-v_\textrm{min}}$,0),1)
 
-To calculate the final pixel color the samples along a ray are accumulated using alpha blending:
+To calculate the final pixel color the $N$ samples along a ray are accumulated using alpha blending:
 
 $C_p = \sum_{i=0}^{N} \hat{a_i} C_i \prod_{j=0}^{i-1}(1-\hat{a_j})$
 
@@ -31,7 +32,7 @@ $\hat{a_i} = 1-a_i^{\delta s}$
 
 **Step size $\delta$**: A smaller step size gives more detailed / accurate results but results in worse performance.
 
-**Distance Scaling**: Since the "original" sampling rate is not known the user has to specify it. A larger value makes the whole volume appear more opqaue/dense.
+**Distance Scaling**: Since the "original" sampling rate is not known the user has to specify it. A larger value makes the whole volume appear more opaque/dense.
 
 ## Getting Started
 

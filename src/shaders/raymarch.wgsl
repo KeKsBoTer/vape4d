@@ -194,8 +194,7 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
         }
         iters += 1u;
     }
-    let a = 1. - exp(-transmittance);
-    return vec4<f32>(color, a);
+    return vec4<f32>(color, 1. - transmittance);
 }
 
 fn gamma_correction(color: vec4<f32>) -> vec4<f32> {
