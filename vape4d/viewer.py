@@ -10,7 +10,7 @@ from typing import Optional
 import numpy as np
 from IPython.display import DisplayObject
 
-VAPE_URL = os.environ.get("VAPE_URL", "https://keksboter.github.io/vape")
+VAPE_URL = os.environ.get("VAPE_URL", "https://keksboter.github.io/vape4d")
 
 
 TEMPLATE_IFRAME = """
@@ -102,7 +102,7 @@ class VolumeViewer(DisplayObject):
         np.save(buffer2, colormap_data)
         cmap_code = base64.b64encode(buffer2.getvalue())
 
-        canvas_id = f"vape_canvas_{str(random.randint(0,2**32))}"
+        canvas_id = f"vape4d_canvas_{str(random.randint(0,2**32))}"
         html_code = TEMPLATE_IFRAME.format(
             canvas_id=canvas_id,
             data_code=data_code.decode("utf-8"),

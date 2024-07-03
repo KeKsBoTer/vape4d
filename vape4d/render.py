@@ -1,7 +1,7 @@
 from typing import Optional, Union
 from matplotlib.colors import Colormap
 import numpy as np
-from . import vape
+from . import vape4d
 
 
 def render(
@@ -37,7 +37,7 @@ def render(
     """
     colormap_data = cmap(np.linspace(0, 1, 256)).astype(np.float32)
     if isinstance(time, list):
-        img = vape.render_video(
+        img = vape4d.render_video(
             volume,
             colormap_data,
             width,
@@ -52,7 +52,7 @@ def render(
         )
         return img
     else:
-        img = vape.render_img(
+        img = vape4d.render_img(
             volume,
             colormap_data,
             width,
