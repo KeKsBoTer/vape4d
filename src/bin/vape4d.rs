@@ -1,8 +1,8 @@
 use clap::Parser;
 use std::{fmt::Debug, fs::File, io::BufReader, path::PathBuf};
 
-use vape::cmap;
-use vape::{open_window, volume::Volume, RenderConfig};
+use vape4d::cmap;
+use vape4d::{open_window, volume::Volume, RenderConfig};
 use winit::{dpi::PhysicalSize, window::WindowBuilder};
 
 #[derive(Debug, Parser)]

@@ -2,7 +2,7 @@ from matplotlib import pyplot as plt
 from PIL import Image
 import numpy as np
 
-from vape import diverging_alpha, render
+from vape4d import diverging_alpha, render
 
 
 colormap = diverging_alpha(plt.get_cmap("magma"))
@@ -17,9 +17,9 @@ img = (
         vmax=10,
         background=(0, 255, 0, 255),
         distance_scale=10,
+        spatial_interpolation="nearest",
     ).astype(np.float32)
     / 255
 )
-# img[:, :, :3] = img[:, :, :3] * img[:, :, 3:4]
 img[:, :, 3] = 1
-Image.fromarray((img * 255).astype(np.uint8)).show()
+Image.fromarray((img * 255).astype(np.uint8)).save("test.png")  # .show()

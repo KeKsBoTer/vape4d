@@ -10,7 +10,7 @@ use crate::{
 };
 
 #[pymodule]
-fn vape<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
+fn vape4d<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
     // example using generic PyObject
     #[pyfn(m)]
     fn render_img<'py>(
