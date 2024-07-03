@@ -1,3 +1,3 @@
 # Utilities
 
-::: vape.diverging_alpha
+::: vape4d.diverging_alpha

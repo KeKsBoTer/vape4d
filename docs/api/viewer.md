@@ -1,11 +1,11 @@
 # Viewer
 
-::: vape.viewer
+::: vape4d.viewer
 
 ---
 
-::: vape.VolumeViewer
+::: vape4d.VolumeViewer
 
 ---
 
-::: vape.ViewerSettings
+::: vape4d.ViewerSettings

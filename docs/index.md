@@ -1,5 +1,7 @@
 # Getting Started
 
+
+
 ## Installation
 
 ```bash
@@ -10,7 +12,7 @@ pip install vape4d
 
 **Viewer** (jupyter notebook)
 ```python
-from vape import viewer
+from vape4d import viewer
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -24,7 +26,7 @@ viewer(
 **Render Image**
 ```python
 import numpy as np
-from vape import diverging_alpha, render
+from vape4d import diverging_alpha, render
 import matplotlib.pyplot as plt
 
 colormap = diverging_alpha(plt.get_cmap("magma"))
