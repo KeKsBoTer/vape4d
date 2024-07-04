@@ -128,9 +128,6 @@
             window.addEventListener(
                 "message",
                 async (event) => {
-                    if (event.origin == window.origin) {
-                        return;
-                    }
                     let init_promise = init();
                     await init_promise;
                     let settings = event.data["settings"];

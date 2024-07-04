@@ -11,7 +11,7 @@ Real-time rendering for time-variying volumes (4D = 3D Space + Time) written in 
 ![Volume Rendering](img/volume_rendering_dark.svg#only-dark)
 
 ## Rendering Technique
-The rendering techniques used for volume rendering rely heavily on methods described in the book [Real-Time Volume Graphics](http://www.real-time-volume-graphics.org/).f
+The rendering techniques used for volume rendering rely heavily on methods described in the book [Real-Time Volume Graphics](http://www.real-time-volume-graphics.org/).
 
 A user defined transfer function $f$ is used that maps a value $\hat{v_i}\in[0,1]$ to RGBA color:   
 

@@ -7,6 +7,8 @@ import random
 from dataclasses import dataclass
 from typing import Optional
 
+from matplotlib import pyplot as plt
+from matplotlib.colors import Colormap
 import numpy as np
 from IPython.display import DisplayObject
 
@@ -57,7 +59,7 @@ class ViewerSettings:
 
 def viewer(
     data: np.ndarray,
-    colormap,
+    colormap: Optional[Colormap] = None,
     width: int = 800,
     height: int = 600,
     background_color=(0.0, 0.0, 0.0, 1.0),
@@ -68,6 +70,23 @@ def viewer(
     distance_scale=1.0,
     duration=None,
 ):
+    """_summary_
+
+    Args:
+        data (np.ndarray): volume data of shape [T,C, D, H, W]
+        colormap (Optional[Colormap], optional): _description_. Defaults to matplotlib default colormap.
+        width (int, optional): viewer width. Defaults to 800.
+        height (int, optional): viewer height. Defaults to 600.
+        background_color (tuple, optional): background color in renderer. Defaults to black.
+        show_colormap_editor (bool, optional): show the transfer function editor. Defaults to False.
+        show_volume_info (bool, optional): show the volume info window. Defaults to False.
+        vmin (float, optional): all values in data are clamped to this value. Defaults to minimum value in data.
+        vmax (float, optional):  all values in data are clamped to this value. Defaults to maximum value in data.
+        distance_scale (float, optional): distance scale used for rendering. Defaults to 1.0.
+        duration (_type_, optional): duration of one animation cycle. Defaults to 5 seconds.
+    """
+    if colormap is None:
+        colormap = plt.get_cmap()
     return VolumeViewer(
         data,
         colormap,
@@ -86,7 +105,7 @@ def viewer(
 
 
 class VolumeViewer(DisplayObject):
-    def __init__(self, data: np.ndarray, colormap, settings: ViewerSettings):
+    def __init__(self, data: np.ndarray, colormap: Colormap, settings: ViewerSettings):
         super(VolumeViewer, self).__init__(
             data={"volume": data, "cmap": colormap, "settings": settings}
         )

@@ -2436,6 +2436,7 @@ version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec170733ca37175f5d75a5bea5911d6ff45d2cd52849ce98b685394e4f2f37f4"
 dependencies = [
+ "half",
  "libc",
  "ndarray",
  "num-complex",
@@ -3881,7 +3882,7 @@ dependencies = [
 
 [[package]]
 name = "vape4d"
-version = "0.2.0"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "bytemuck",

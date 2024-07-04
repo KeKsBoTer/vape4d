@@ -23,10 +23,10 @@ pub struct Volume {
 
 impl Volume {
     #[cfg(feature = "python")]
-    pub fn from_array(data: ArrayViewD<f32>) -> Self {
+    pub fn from_array(data: ArrayViewD<f16>) -> Self {
         let shape = data.shape().to_vec();
         let resolution = [shape[1] as u32, shape[2] as u32, shape[3] as u32];
-        let vec_data = data.iter().map(|v| f16::from_f32(*v)).collect();
+        let vec_data = data.to_slice().unwrap().to_vec();
 
         let res_min = resolution.iter().min().unwrap();
         let aabb = Aabb {
@@ -37,12 +37,14 @@ impl Volume {
                 resolution[0] as f32 / *res_min as f32,
             ),
         };
+        let vmin = *vec_data.iter().min_by(|a, b| a.total_cmp(b)).unwrap();
+        let vmax = *vec_data.iter().max_by(|a, b| a.total_cmp(b)).unwrap();
         Self {
             timesteps: shape[0] as u32,
             resolution: resolution.into(),
             aabb,
-            min_value: *data.iter().min_by(|a, b| a.total_cmp(b)).unwrap(),
-            max_value: *data.iter().max_by(|a, b| a.total_cmp(b)).unwrap(),
+            min_value: vmin.to_f32(),
+            max_value: vmax.to_f32(),
             data: vec_data,
         }
     }

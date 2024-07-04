@@ -1,4 +1,5 @@
 from typing import Optional, Union
+from matplotlib import pyplot as plt
 from matplotlib.colors import Colormap
 import numpy as np
 from . import vape4d
@@ -6,8 +7,8 @@ from . import vape4d
 
 def render(
     volume: np.ndarray,
-    cmap: Colormap,
-    time: Union[float, list[float]],
+    cmap: Optional[Colormap] = None,
+    time: Optional[Union[float, list[float]]] = 0.0,
     width: int = 1024,
     height: int = 1024,
     background: tuple[float, float, float, float] = (0, 0, 0, 1),
@@ -20,8 +21,8 @@ def render(
     """renders a single or multiple images of a volume
 
     Args:
-        volume (np.ndarray): volume data of shape [N, H, W, D]
-        cmap (Colormap): colormap to use for rendering
+        volume (np.ndarray): volume data of shape [N, D, H, W]
+        cmap (Colormap): colormap to use for rendering. Defaults to matplotlib's default colormap.
         time (Union[float, list[float]]): if a single value is given, a single image is rendered at that time. If a list of values is given, a video is rendered with the given times.
         width (int, optional): image width. Defaults to 1024.
         height (int, optional): image height. Defaults to 1024.
@@ -35,34 +36,45 @@ def render(
     Returns:
         np.ndarray: [T, H, W, 4] if time is a list, [H, W, 4] if time is a single value
     """
-    colormap_data = cmap(np.linspace(0, 1, 256)).astype(np.float32)
-    if isinstance(time, list):
-        img = vape4d.render_video(
-            volume,
-            colormap_data,
-            width,
-            height,
-            time,
-            background,
-            distance_scale,
-            vmin,
-            vmax,
-            spatial_interpolation,
-            temporal_interpolation,
-        )
-        return img
+
+    if cmap is None:
+        cmap = plt.get_cmap()
+
+    if volume.ndim == 5:
+        # check if we have a single channel
+        if volume.shape[1] != 1:
+            raise ValueError("only one channel supported")
+    elif volume.ndim == 4:
+        pass
+    elif volume.ndim == 3:
+        # add one channel
+        volume = volume[:, None]
     else:
-        img = vape4d.render_img(
-            volume,
-            colormap_data,
-            width,
-            height,
-            time,
-            background,
-            distance_scale,
-            vmin,
-            vmax,
-            spatial_interpolation,
-            temporal_interpolation,
+        raise ValueError(
+            "volume must have shape [T,1, D, H, W], [T, D, H, W] or [D,H,W] "
         )
-        return img
+
+    colormap_data = cmap(np.linspace(0, 1, 256)).astype(np.float32)
+
+    if isinstance(time, np.ndarray):
+        time = time.tolist()
+
+    if not isinstance(time, list):
+        time = [time]
+
+    frames = vape4d.render_video(
+        np.ascontiguousarray(volume).astype(np.float16),
+        colormap_data,
+        width,
+        height,
+        time,
+        background,
+        distance_scale,
+        vmin,
+        vmax,
+        spatial_interpolation,
+        temporal_interpolation,
+    )
+    if len(time) == 1:
+        return frames[0]
+    return frames
