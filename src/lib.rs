@@ -36,6 +36,8 @@ mod ui;
 mod ui_renderer;
 pub mod offline;
 pub mod volume;
+mod viewer;
+pub use viewer::viewer;
 #[cfg(feature = "python")]
 pub mod py;
 // pub mod image;
@@ -50,6 +52,7 @@ pub struct RenderConfig {
     pub vmax:Option<f32>,
     #[cfg(feature = "colormaps")]
     pub show_cmap_select:bool,
+    pub duration: Option<Duration>,
 }
 
 pub struct WGPUContext {
@@ -207,7 +210,7 @@ impl WindowContext {
             OrthographicProjection::new(Vector2::new(ratio,1.)*2.*radius, 1e-4, 100.)
         );
 
-        let animation_duration = Duration::from_secs_f32(volumes[0].timesteps as f32*0.05);
+        let animation_duration = render_config.duration.unwrap_or(Duration::from_secs_f32(5.));
         
         let num_columns =  volumes.len().min(4) as u32;
         let volumes_gpu = volumes.into_iter().map(|v| VolumeGPU::new(device, queue, v)).collect();

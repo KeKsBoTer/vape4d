@@ -2,10 +2,12 @@ use cgmath::Vector2;
 use image::{ImageBuffer, Rgba};
 use numpy::{ndarray::StrideShape, IntoPyArray, PyArray3, PyArray4, PyReadonlyArrayDyn};
 use pyo3::prelude::*;
+use std::env::{self};
 
 use crate::{
     cmap::{self, ListedColorMap},
     offline::render_volume,
+    viewer,
     volume::Volume,
 };
 
@@ -108,6 +110,17 @@ fn vape4d<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
         return arr.into_pyarray_bound(py);
     }
 
+    #[pyfn(m)]
+    fn standalone<'py>(_py: Python<'py>) -> PyResult<()> {
+        // donts pass first argument (binary name) to parser
+        match pollster::block_on(viewer(env::args().skip(1))) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(PyErr::new::<pyo3::exceptions::PyException, _>(format!(
+                "{:?}",
+                e
+            ))),
+        }
+    }
     Ok(())
 }
 

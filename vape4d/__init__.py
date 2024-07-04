@@ -1,6 +1,13 @@
 from .render import render
-from .utils import diverging_alpha
-from .viewer import viewer, VolumeViewer, ViewerSettings
+from . import utils
+
+try:
+    # check if ipython is available
+    import IPython as _
+    from .viewer import viewer, ViewerSettings, VolumeViewer
+except ImportError:
+    pass
+
 from . import vape4d as vape_py
 
 __doc__ = vape_py.__doc__

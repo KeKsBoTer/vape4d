@@ -109,7 +109,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 ui.label("Spatial Interpolation");
 
                 egui::ComboBox::new("spatial_interpolation", "")
-                    .selected_text(match state.render_settings.temporal_filter {
+                    .selected_text(match state.render_settings.spatial_filter {
                         wgpu::FilterMode::Nearest => "Nearest",
                         wgpu::FilterMode::Linear => "Linear",
                     })

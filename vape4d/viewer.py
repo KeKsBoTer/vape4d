@@ -52,6 +52,7 @@ class ViewerSettings:
     vmin: Optional[float]
     vmax: Optional[float]
     distance_scale: float
+    duration: Optional[float] = None
 
 
 def viewer(
@@ -65,6 +66,7 @@ def viewer(
     vmin=None,
     vmax=None,
     distance_scale=1.0,
+    duration=None,
 ):
     return VolumeViewer(
         data,
@@ -78,6 +80,7 @@ def viewer(
             vmin,
             vmax,
             distance_scale,
+            duration,
         ),
     )
 
