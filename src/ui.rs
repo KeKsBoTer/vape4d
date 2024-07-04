@@ -40,7 +40,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                             }
                         })
                         .suffix("s")
-                        .clamp_range((0.)..=1000.),
+                        .range((0.)..=1000.),
                     );
                     ui.end_row();
                 }
@@ -49,7 +49,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 ui.add(
                     egui::DragValue::new(&mut state.render_settings.step_size)
                         .speed(0.01)
-                        .clamp_range((1e-3)..=(0.1)),
+                        .range((1e-3)..=(0.1)),
                 );
                 ui.end_row();
 
@@ -57,7 +57,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 ui.add(
                     egui::DragValue::new(&mut state.render_settings.distance_scale)
                         .speed(0.01)
-                        .clamp_range((1e-4)..=(100000.)),
+                        .range((1e-4)..=(100000.)),
                 );
                 ui.end_row();
                 ui.label("Background Color");
@@ -99,8 +99,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         let max_rows = state.volumes.len();
                         ui.add(
                             egui::DragValue::new(&mut state.num_columns)
-                                .speed(0.01)
-                                .clamp_range(1..=max_rows),
+                                .range(1u32..=max_rows as u32),
                         );
                         ui.end_row();
                     }
@@ -313,14 +312,6 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     .on_hover_text("Drag anchor points to change transfer function.\nLeft-Click for new anchor point.\nRight-Click to delete anchor point.");
                 }
                 ui.end_row();
-                #[cfg(not(target_arch = "wasm32"))]
-                ui.horizontal(|ui| {
-                    ui.text_edit_singleline(&mut state.cmap_save_path);
-                    if ui.button("Save").clicked() {
-                        let file = std::fs::File::create(state.cmap_save_path.clone()).unwrap();
-                        serde_json::to_writer(file, &state.cmap).unwrap();
-                    }
-                });
             });
     }
     state
@@ -341,7 +332,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     ui.end_row();
                     ui.label("resolution");
                     let res = state.volumes[0].volume.resolution;
-                    ui.label(format!("{}x{}x{} (WxDxH)", res.x, res.y, res.z));
+                    ui.label(format!("{}x{}x{} (WxHxD)", res.x, res.y, res.z));
                     ui.end_row();
                     ui.label("value range");
                     ui.label(format!(
@@ -541,7 +532,7 @@ fn optional_drag<T: Numeric>(
         })
     };
     if let Some(range) = range {
-        drag = drag.clamp_range(range);
+        drag = drag.range(range);
     }
     if let Some(speed) = speed {
         drag = drag.speed(speed);

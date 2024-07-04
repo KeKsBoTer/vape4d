@@ -58,6 +58,7 @@ where
             #[cfg(feature = "colormaps")]
             show_cmap_select: true,
             duration: None,
+            distance_scale: 1.0,
         },
     )
     .await;

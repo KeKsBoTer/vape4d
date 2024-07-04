@@ -8,8 +8,8 @@ description = "4D Volume Viewer"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wgpu = { version = "0.19.3", features = ["webgl"] }
-winit = "0.29.15"
+wgpu = { version = "0.20.1", features = ["webgl"] }
+winit = "0.29.4"
 cgmath = { version = "0.18.0", features = [
     "bytemuck",
 ], git = 'https://github.com/rustgd/cgmath' }
@@ -25,10 +25,10 @@ once_cell = { version = "1.19.0", optional = true }
 image = "0.25.0"
 
 
-egui = "0.27.2"
-egui-wgpu = "0.27.2"
-egui-winit = { version = "0.27.2", features = [], default-features = false }
-egui_plot = "0.27.2"
+egui = "0.28.0"
+egui-wgpu = "0.28.0"
+egui-winit = { version = "0.28.0", features = [], default-features = false }
+egui_plot = "0.28.0"
 
 npyz = { version = "0.8.3", features = ["npz", "half"] }
 futures-intrusive = "0.5.0"

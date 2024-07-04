@@ -31,6 +31,7 @@ _TEMPLATE_IFRAME = """
                 let cmap_decoded = Uint8Array.from(atob("{cmap_code}"), c => c.charCodeAt(0));
                 const iframe = document.getElementById("{canvas_id}");
                 if (iframe === null) return;
+                iframe.focus();
                 iframe.contentWindow.postMessage({{
                     volume: data_decoded,
                     cmap: cmap_decoded,

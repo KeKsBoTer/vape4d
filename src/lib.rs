@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use camera::{Camera, OrthographicProjection};
 use cmap::LinearSegmentedColorMap;
 use controller::CameraController;
@@ -50,6 +50,7 @@ pub struct RenderConfig {
     pub show_volume_info:bool,
     pub vmin:Option<f32>,
     pub vmax:Option<f32>,
+    pub distance_scale:f32,
     #[cfg(feature = "colormaps")]
     pub show_cmap_select:bool,
     pub duration: Option<Duration>,
@@ -121,8 +122,6 @@ pub struct WindowContext {
 
     colormap_editor_visible:bool,
     volume_info_visible:bool,
-    #[cfg(not(target_arch = "wasm32"))]
-    cmap_save_path:String,
     #[cfg(feature = "colormaps")]
     cmap_select_visible:bool,
 }
@@ -194,7 +193,7 @@ impl WindowContext {
             step_size: 2. / 1000.,
             spatial_filter: wgpu::FilterMode::Linear,
             temporal_filter: wgpu::FilterMode::Linear,
-            distance_scale: 1.,
+            distance_scale: render_config.distance_scale,
             vmin:render_config.vmin,
             vmax:render_config.vmax,
             gamma_correction:!surface_format.is_srgb()
@@ -239,11 +238,19 @@ impl WindowContext {
             selected_channel:None,
             colormap_editor_visible:render_config.show_colormap_editor,
             volume_info_visible:render_config.show_volume_info,
-            #[cfg(not(target_arch = "wasm32"))]
-            cmap_save_path:"cmap.json".to_string(),
             #[cfg(feature = "colormaps")]
             cmap_select_visible:render_config.show_cmap_select,
         })
+    }
+
+    fn load_file(&mut self, path: &PathBuf)->anyhow::Result<()> {
+        let reader = std::fs::File::open(path)?;
+        let volume = Volume::load_numpy(reader, true)?;
+        let volume_gpu = volume.into_iter().map(|v| VolumeGPU::new(&self.wgpu_context.device, &self.wgpu_context.queue, v)).collect();
+        self.volumes = volume_gpu;
+        // self.controller.center = volume.aabb.center();
+        self.camera.projection.resize(self.config.width, self.config.height);
+        Ok(())
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>, scale_factor: Option<f32>) {
@@ -448,6 +455,11 @@ pub async fn open_window(window_builder:WindowBuilder,volumes: Vec<Volume>,cmap:
                     winit::event::MouseButton::Left =>                         state.controller.left_mouse_pressed = *button_state == ElementState::Pressed,
                     winit::event::MouseButton::Right => state.controller.right_mouse_pressed = *button_state == ElementState::Pressed,
                     _=>{}
+                }
+            },
+            WindowEvent::DroppedFile(file) => {
+                if let Err(e) = state.load_file(file){
+                    log::error!("failed to load file: {:?}", e)
                 }
             }
             WindowEvent::RedrawRequested => {

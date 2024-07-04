@@ -117,6 +117,7 @@
         document.getElementById("spinner").style.display = "flex";
 
         let canvas = document.getElementById("window-canvas");
+        canvas.focus();
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
         canvas.style.width = "100%";
@@ -142,6 +143,8 @@
                             false, // show colormap select editor
                             settings["vmin"],
                             settings["vmax"],
+                            settings["distance_scale"],
+                            settings["duration"],
                         )
                     );
                     window.removeEventListener("message", this)

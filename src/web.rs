@@ -125,6 +125,7 @@ pub async fn viewer_inline(
             show_volume_info: settings.show_volume_info,
             vmin: settings.vmin,
             vmax: settings.vmax,
+            distance_scale: settings.distance_scale,
             #[cfg(feature = "colormaps")]
             show_cmap_select: settings.show_cmap_select,
             duration: settings.duration.map(Duration::from_secs_f32),
@@ -195,6 +196,7 @@ pub async fn viewer_wasm(canvas_id: String) {
                     vmin: None,
                     vmax: None,
                     duration: None,
+                    distance_scale: 1.0,
                 },
             ));
             break;

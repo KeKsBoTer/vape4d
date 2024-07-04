@@ -68,6 +68,9 @@ impl Volume {
         let timesteps = array.shape()[time_dim] as usize;
         let channels = array.shape()[channel_dim] as usize;
         log::debug!("size: {:?}", array.shape());
+        if array.shape().len() != 5 {
+            anyhow::bail!("unsupported shape: {:?}", array.shape());
+        }
         let resolution = [
             array.shape()[2] as u32,
             array.shape()[3] as u32,
