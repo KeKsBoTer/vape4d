@@ -44,7 +44,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                                 }
                             })
                             .suffix("s")
-                            .clamp_range((0.)..=1000.),
+                            .range((0.)..=1000.),
                         )
                         .on_hover_text("Animation Duration");
                     });
@@ -90,15 +90,14 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         let max_rows = state.volumes.len();
                         ui.add(
                             egui::DragValue::new(&mut state.num_columns)
-                                .speed(0.01)
-                                .clamp_range(1..=max_rows),
+                                .range(1u32..=max_rows as u32),
                         );
                         ui.end_row();
                     }
                 }
 
                 ui.with_layout(Layout::top_down(Align::Min), |ui| {
-                    ui.add(egui::Label::new("Rendering Modes").wrap(false));
+                    ui.add(egui::Label::new("Rendering Modes").wrap_mode(TextWrapMode::Extend));
                 });
                 ui.vertical(|ui| {
                     ui.checkbox(&mut state.render_settings.render_volume, "Volume");
@@ -113,14 +112,14 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     ui.add(
                         egui::DragValue::new(&mut state.render_settings.step_size)
                             .speed(0.01)
-                            .clamp_range((1e-3)..=(0.1)),
+                            .range((1e-3)..=(0.1)),
                     );
                     ui.end_row();
                     ui.with_layout(Layout::top_down(Align::Min), |ui| {
                         ui.add(
                             egui::Label::new("Interpolation")
                                 .selectable(true)
-                                .wrap(false),
+                                .wrap_mode(TextWrapMode::Extend),
                         )
                     });
                     ui.vertical(|ui| {
@@ -180,14 +179,14 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     ui.add(
                         egui::DragValue::new(&mut state.render_settings.distance_scale)
                             .speed(0.01)
-                            .clamp_range((1e-4)..=(100000.)),
+                            .range((1e-4)..=(100000.)),
                     );
                     ui.end_row();
                     ui.with_layout(Layout::top_down(Align::Min), |ui| {
                         ui.add(
                             egui::Label::new("Value Range")
                                 .selectable(true)
-                                .wrap(false),
+                                .wrap_mode(TextWrapMode::Extend),
                         )
                     });
                     ui.vertical(|ui| {
@@ -356,17 +355,9 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         .on_hover_text("Drag anchor points to change transfer function.\nLeft-Click for new anchor point.\nRight-Click to delete anchor point.");
                     }
                     ui.end_row();
-                    ui.separator();
-                    #[cfg(not(target_arch = "wasm32"))]
-                    ui.horizontal(|ui| {
-                        ui.text_edit_singleline(&mut state.cmap_save_path);
-                        if ui.button("Save to File").clicked() {
-                            let file = std::fs::File::create(state.cmap_save_path.clone()).unwrap();
-                            serde_json::to_writer(file, &state.cmap).unwrap();
-                        }
-                    });
                 });
 
+                ui.separator();
             });
     }
     state
@@ -384,7 +375,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         ui.label("Threshold");
                         ui.add(
                             egui::DragValue::new(&mut state.render_settings.iso_threshold)
-                                .clamp_range(
+                                .range(
                                     state.volumes[0].volume.min_value
                                         ..=state.volumes[0].volume.max_value, // TODO use all volume for vmin vmax
                                 )
@@ -393,7 +384,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         ui.end_row();
 
                         ui.label("Color");
-                        color_edit_button_rgb(ui, &mut state.render_settings.iso_diffuse_color);
+                        color_edit_button_rgba(ui, &mut state.render_settings.iso_diffuse_color);
                         ui.end_row();
                     });
 
@@ -405,7 +396,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                             ui.label("Shininess");
                             ui.add(
                                 egui::DragValue::new(&mut state.render_settings.iso_shininess)
-                                    .clamp_range((0.)..=1e6),
+                                    .range((0.)..=1e6),
                             );
                             ui.end_row();
 
@@ -513,7 +504,7 @@ pub fn argsort<T: PartialOrd>(data: &[T]) -> Vec<usize> {
     indices
 }
 
-use cgmath::{Transform, Vector3, Zero};
+use cgmath::{Transform, Vector3, Vector4, Zero};
 use egui::{epaint::PathShape, *};
 
 pub fn tf_ui(ui: &mut Ui, points: &mut Vec<(f32, f32, f32)>) -> egui::Response {
@@ -641,7 +632,7 @@ fn optional_drag<T: Numeric>(
         })
     };
     if let Some(range) = range {
-        drag = drag.clamp_range(range);
+        drag = drag.range(range);
     }
     if let Some(speed) = speed {
         drag = drag.speed(speed);
@@ -704,3 +695,14 @@ pub fn color_edit_button_rgb(ui: &mut Ui, rgb: &mut Vector3<f32>) -> Response {
     rgb[2] = rgba[2];
     response
 }
+
+pub fn color_edit_button_rgba(ui: &mut Ui, rgb: &mut Vector4<f32>) -> Response {
+    let mut rgba = Rgba::from_rgba_premultiplied(rgb[0], rgb[1], rgb[2],rgb[3]);
+    let response = color_picker::color_edit_button_rgba(ui, &mut rgba, color_picker::Alpha::BlendOrAdditive);
+    rgb[0] = rgba[0];
+    rgb[1] = rgba[1];
+    rgb[2] = rgba[2];
+    rgb[3] = rgba[3];
+    response
+}
+

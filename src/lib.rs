@@ -2,7 +2,7 @@ use camera::{Camera, OrthographicProjection};
 use cmap::LinearSegmentedColorMap;
 use controller::CameraController;
 use renderer::{RenderSettings, VolumeRenderer};
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use volume::VolumeGPU;
 
 #[cfg(target_arch = "wasm32")]
@@ -41,18 +41,24 @@ pub mod renderer;
 mod ui;
 mod ui_renderer;
 pub mod volume;
+mod viewer;
+pub use viewer::viewer;
+#[cfg(feature = "python")]
+pub mod py;
 // pub mod image;
 
 #[derive(Debug)]
 pub struct RenderConfig {
     pub no_vsync: bool,
     pub background_color: wgpu::Color,
-    pub show_colormap_editor: bool,
-    pub show_volume_info: bool,
-    pub vmin: Option<f32>,
-    pub vmax: Option<f32>,
+    pub show_colormap_editor:bool,
+    pub show_volume_info:bool,
+    pub vmin:Option<f32>,
+    pub vmax:Option<f32>,
+    pub distance_scale:f32,
     #[cfg(feature = "colormaps")]
-    pub show_cmap_select: bool,
+    pub show_cmap_select:bool,
+    pub duration: Option<Duration>,
 }
 
 pub struct WGPUContext {
@@ -115,10 +121,8 @@ pub struct WindowContext {
     num_columns: u32,
     selected_channel: Option<usize>,
 
-    colormap_editor_visible: bool,
-    volume_info_visible: bool,
-    #[cfg(not(target_arch = "wasm32"))]
-    cmap_save_path: String,
+    colormap_editor_visible:bool,
+    volume_info_visible:bool,
     #[cfg(feature = "colormaps")]
     cmap_select_visible: bool,
 }
@@ -191,10 +195,10 @@ impl WindowContext {
             step_size: 2. / 1000.,
             spatial_filter: wgpu::FilterMode::Linear,
             temporal_filter: wgpu::FilterMode::Linear,
-            distance_scale: 1.,
-            vmin: render_config.vmin,
-            vmax: render_config.vmax,
-            gamma_correction: !surface_format.is_srgb(),
+            distance_scale: render_config.distance_scale,
+            vmin:render_config.vmin,
+            vmax:render_config.vmax,
+            gamma_correction:!surface_format.is_srgb(),
             ..Default::default()
         };
 
@@ -208,8 +212,8 @@ impl WindowContext {
             OrthographicProjection::new(Vector2::new(ratio, 1.) * 2. * radius, 1e-4, 100.),
         );
 
-        let animation_duration = Duration::from_secs_f32(volumes[0].timesteps as f32 * 0.05);
-
+        let animation_duration = render_config.duration.unwrap_or(Duration::from_secs_f32(5.));
+        
         let num_columns = volumes.len().min(4) as u32;
         let volumes_gpu = volumes
             .into_iter()
@@ -237,14 +241,22 @@ impl WindowContext {
             animation_duration,
             playing: true,
             num_columns,
-            selected_channel: None,
-            colormap_editor_visible: render_config.show_colormap_editor,
-            volume_info_visible: render_config.show_volume_info,
-            #[cfg(not(target_arch = "wasm32"))]
-            cmap_save_path: "cmap.json".to_string(),
+            selected_channel:None,
+            colormap_editor_visible:render_config.show_colormap_editor,
+            volume_info_visible:render_config.show_volume_info,
             #[cfg(feature = "colormaps")]
             cmap_select_visible: render_config.show_cmap_select,
         })
+    }
+
+    fn load_file(&mut self, path: &PathBuf)->anyhow::Result<()> {
+        let reader = std::fs::File::open(path)?;
+        let volume = Volume::load(reader)?;
+        let volume_gpu = volume.into_iter().map(|v| VolumeGPU::new(&self.wgpu_context.device, &self.wgpu_context.queue, v)).collect();
+        self.volumes = volume_gpu;
+        // self.controller.center = volume.aabb.center();
+        self.camera.projection.resize(self.config.width, self.config.height);
+        Ok(())
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>, scale_factor: Option<f32>) {
@@ -457,6 +469,11 @@ pub async fn open_window(
                     winit::event::MouseButton::Left =>                         state.controller.left_mouse_pressed = *button_state == ElementState::Pressed,
                     winit::event::MouseButton::Right => state.controller.right_mouse_pressed = *button_state == ElementState::Pressed,
                     _=>{}
+                }
+            },
+            WindowEvent::DroppedFile(file) => {
+                if let Err(e) = state.load_file(file){
+                    log::error!("failed to load file: {:?}", e)
                 }
             }
             WindowEvent::RedrawRequested => {

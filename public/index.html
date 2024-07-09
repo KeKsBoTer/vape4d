@@ -112,11 +112,12 @@
     </div>
     <canvas id="window-canvas"></canvas>
     <script type="module">
-        import init, { viewer_inline, viewer_wasm, InlineViewerConfig, Color } from "./vape.js";
+        import init, { viewer_inline, viewer_wasm, InlineViewerConfig, Color } from "./vape4d.js";
 
         document.getElementById("spinner").style.display = "flex";
 
         let canvas = document.getElementById("window-canvas");
+        canvas.focus();
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
         canvas.style.width = "100%";
@@ -128,9 +129,6 @@
             window.addEventListener(
                 "message",
                 async (event) => {
-                    if (event.origin == window.origin) {
-                        return;
-                    }
                     let init_promise = init();
                     await init_promise;
                     let settings = event.data["settings"];
@@ -145,6 +143,8 @@
                             false, // show colormap select editor
                             settings["vmin"],
                             settings["vmax"],
+                            settings["distance_scale"],
+                            settings["duration"],
                         )
                     );
                     window.removeEventListener("message", this)

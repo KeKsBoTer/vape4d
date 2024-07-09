@@ -34,7 +34,7 @@ impl VolumeRenderer {
                 module: &shader,
                 entry_point: "vs_main",
                 buffers: &[],
-                // compilation_options: Default::default(),
+                compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -44,7 +44,7 @@ impl VolumeRenderer {
                     blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
-                // compilation_options: Default::default(),
+                compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
@@ -298,7 +298,7 @@ pub struct RenderSettings {
     pub iso_ambient_color: Vector3<f32>,
     pub iso_specular_color: Vector3<f32>,
     pub iso_light_color: Vector3<f32>,
-    pub iso_diffuse_color: Vector3<f32>,
+    pub iso_diffuse_color: Vector4<f32>,
 }
 
 impl Default for RenderSettings {
@@ -320,7 +320,7 @@ impl Default for RenderSettings {
             iso_ambient_color: Vector3::zero(),
             iso_specular_color: Vector3::new(0.7, 0.7, 0.7),
             iso_light_color: Vector3::new(1., 1., 1.),
-            iso_diffuse_color: Vector3::new(0.8, 0.8, 0.8),
+            iso_diffuse_color: Vector4::new(0.8, 0.8, 0.8, 1.0),
         }
     }
 }
@@ -383,7 +383,7 @@ impl RenderSettingsUniform {
             iso_ambient_color: settings.iso_ambient_color.extend(0.),
             iso_specular_color: settings.iso_specular_color.extend(0.),
             iso_light_color: settings.iso_light_color.extend(0.),
-            iso_diffuse_color: settings.iso_diffuse_color.extend(0.),
+            iso_diffuse_color: settings.iso_diffuse_color,
         }
     }
 }

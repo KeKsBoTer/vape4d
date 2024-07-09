@@ -1,19 +1,31 @@
-# vAPE - Interactive 4D volume visualization for APE
+# vAPE - Interactive 4D volume visualization
 
-![Viewer screenshot](screenshot.png)
+[![PyPI](https://img.shields.io/pypi/v/vape4d.svg)](https://pypi.org/project/vape4d/)
+[![Docs](https://img.shields.io/badge/docs-mkdocs-blue)
+](https://keksboter.github.io/vape4d/docs/)
+
+[👉 Click to run the web app 👈](https://keksboter.github.io/vape4d)
+
+![Viewer screenshot](https://raw.githubusercontent.com/KeKsBoTer/vape4d/master/screenshot.png)
+
+[Burgers](https://en.wikipedia.org/wiki/Burgers%27_equation)            |  [Kuramoto–Sivashinsky](https://en.wikipedia.org/wiki/Kuramoto%E2%80%93Sivashinsky_equation)                              |  [Gray-Scott](https://groups.csail.mit.edu/mac/projects/amorphous/GrayScott/)
+:-------------------------:|:------------------------:|:-------------------------:
+![Burgers](https://raw.githubusercontent.com/KeKsBoTer/vape4d/master/references_3d/burgers_1.webp)  |![Kuramoto–Sivashinsky](https://raw.githubusercontent.com/KeKsBoTer/vape4d/master/references_3d/ks.webp)|![Gray Scott](https://raw.githubusercontent.com/KeKsBoTer/vape4d/master/references_3d/gray_scott.webp)|
+
 
 ## Installation
 
 with pip
 ```
-pip install git+ssh://git@github.com/KeKsBoTer/vape.git@master
+pip install vape4d
 ```
+
 
 ## Usage
 
 **Viewer** (jupyter notebook)
 ```python
-from vape import viewer
+from vape4d import viewer
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -27,7 +39,7 @@ viewer(
 **Render Image**
 ```python
 import numpy as np
-from vape import diverging_alpha, render
+from vape4d import diverging_alpha, render
 import matplotlib.pyplot as plt
 
 colormap = diverging_alpha(plt.get_cmap("magma"))

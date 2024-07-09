@@ -31,7 +31,7 @@ struct Settings {
     @align(16) @size(16) iso_ambient_color: vec3<f32>,
     @align(16) @size(16) iso_specular_color: vec3<f32>,
     @align(16) @size(16) iso_light_color: vec3<f32>,
-    @align(16) @size(16) iso_diffuse_color: vec3<f32>,
+    iso_diffuse_color: vec4<f32>,
 
     render_mode_volume: u32, // use volume rendering
     render_mode_iso: u32, // use iso rendering
@@ -189,7 +189,7 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
 
     var iters = 0u;
     var color = vec3<f32>(0.);
-    var transmittance = 0.;
+    var transmittance = 1.;
 
     let volume_size = textureDimensions(volume);
 
@@ -234,18 +234,16 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
                 let light_color = settings.iso_light_color;
                 let irradi_perp = ISO_IRRADI_PERP;
 
-
                 var radiance = ambient_color;
 
                 let irradiance = max(dot(light_dir, n), 0.0) * irradi_perp;
                 if irradiance > 0.0 {
-                    let brdf = phongBRDF(light_dir, view_dir, n, diffuse_color, specular_color, shininess);
+                    let brdf = phongBRDF(light_dir, view_dir, n, diffuse_color.rgb, specular_color, shininess);
                     radiance += brdf * irradiance * light_color;
                 }
-
-                color = mix(color, radiance, exp(-transmittance));
-                transmittance = 1e6;
-                break;
+                let a = diffuse_color.a;
+                color += transmittance * a * radiance;
+                transmittance *= 1. - a;
             }
 
             first = false;
@@ -253,17 +251,18 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
         }
         if bool(settings.render_mode_volume) {
             let color_tf = sample_cmap(sample);
-            let sigma = color_tf.a;
+            // we dont want full opacity color
+            let sigma = color_tf.a * (1. - 1e-6);
             if sigma > 0. {
                 var sample_color = color_tf.rgb;
-                let a_i = log(1. / (1. - sigma + 1e-4)) * step_size * distance_scale;
-                color += exp(-transmittance) * (1. - exp(-a_i)) * sample_color;
-                transmittance += a_i;
-
-                if exp(-transmittance) <= early_stopping_t {
-                    break;
-                }
+                let a_i = 1. - pow(1. - sigma, step_size * distance_scale);
+                color += transmittance * a_i * sample_color;
+                transmittance *= 1. - a_i;
             }
+        }
+
+        if transmittance <= early_stopping_t {
+            break;
         }
         // check if within slice
         let slice_test = any(sample_pos < settings.clipping.min) || any(sample_pos > settings.clipping.max) ;
@@ -275,8 +274,7 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
         last_sample = sample;
         last_sample_pos = sample_pos;
     }
-    let a = 1. - exp(-transmittance);
-    return vec4<f32>(color, a);
+    return vec4<f32>(color, 1. - transmittance);
 }
 
 fn gamma_correction(color: vec4<f32>) -> vec4<f32> {

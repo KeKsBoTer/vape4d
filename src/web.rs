@@ -1,3 +1,4 @@
+use instant::Duration;
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::JsCast;
 use winit::platform::web::WindowBuilderExtWebSys;
@@ -46,6 +47,7 @@ pub struct InlineViewerConfig {
     pub vmin: Option<f32>,
     pub vmax: Option<f32>,
     pub distance_scale: f32,
+    pub duration: Option<f32>,
 }
 
 #[wasm_bindgen]
@@ -59,6 +61,7 @@ impl InlineViewerConfig {
         vmin: Option<f32>,
         vmax: Option<f32>,
         distance_scale: f32,
+        duration: Option<f32>,
     ) -> Self {
         Self {
             background_color,
@@ -68,6 +71,7 @@ impl InlineViewerConfig {
             vmin,
             vmax,
             distance_scale,
+            duration,
         }
     }
 }
@@ -121,8 +125,10 @@ pub async fn viewer_inline(
             show_volume_info: settings.show_volume_info,
             vmin: settings.vmin,
             vmax: settings.vmax,
+            distance_scale: settings.distance_scale,
             #[cfg(feature = "colormaps")]
             show_cmap_select: settings.show_cmap_select,
+            duration: settings.duration.map(Duration::from_secs_f32),
         },
     ));
 }
@@ -189,6 +195,8 @@ pub async fn viewer_wasm(canvas_id: String) {
                     show_cmap_select: true,
                     vmin: None,
                     vmax: None,
+                    duration: None,
+                    distance_scale: 1.0,
                 },
             ));
             break;
