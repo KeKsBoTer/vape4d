@@ -11,9 +11,17 @@
             width: 100vw;
             height: 100vh;
             overflow: hidden;
-            background-color: transparent;
-            color: white;
             font-family: Arial, Helvetica, sans-serif;
+        }
+
+        #overlay{
+            width: 100vw;
+            height: 100vh;
+            position: fixed;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            pointer-events: none;
         }
 
         #spinner {
@@ -94,25 +102,31 @@
                 opacity: 0;
             }
         }
+
+        #error-message {
+            color: red;
+        }
     </style>
 
 </head>
 
 <body>
-    <div id="spinner" style="display: none;">
-        <div class="lds-ripple">
-            <div></div>
-            <div></div>
+    <div id="overlay">
+        <div id="spinner" style="display: none;">
+            <div class="lds-ripple">
+                <div></div>
+                <div></div>
+            </div>
+            <p>Loading ...</p>
         </div>
-        <p>Loading ...</p>
-    </div>
-    <div id="loading-error" class="alert" style="display: none;">
-        <h1>An error occured</h1>
-        <p></p>
+        <div id="loading-error" class="alert" style="display: none;">
+            <h1>An error occured</h1>
+            <p id="error-message"></p>
+        </div>
     </div>
     <canvas id="window-canvas"></canvas>
     <script type="module">
-        import init, { viewer_inline, viewer_wasm, InlineViewerConfig, Color } from "./vape4d.js";
+        import init, { viewer_wasm, InlineViewerConfig, Color, wasm_setup } from "./vape4d.js";
 
         document.getElementById("spinner").style.display = "flex";
 
@@ -125,17 +139,20 @@
 
         let url = new URL(window.location.href);
         if (url.searchParams.get("inline") !== null) {
-
             window.addEventListener(
                 "message",
                 async (event) => {
+                    if (event.data === "ready") {
+                        return;
+                    }
                     let init_promise = init();
                     await init_promise;
+                    wasm_setup();
                     let settings = event.data["settings"];
-                    viewer_inline(
+                    viewer_wasm(
+                        "window-canvas",
                         event.data["volume"],
                         event.data["cmap"],
-                        "window-canvas",
                         new InlineViewerConfig(
                             new Color(...settings["background_color"]), // background color
                             settings["show_colormap_editor"], // show colormap editor
@@ -154,9 +171,14 @@
         } else {
             let init_promise = init();
             await init_promise;
-            viewer_wasm(
-                "window-canvas"
-            );
+            wasm_setup();
+            let res = viewer_wasm("window-canvas");
+            res.catch((error) => {
+                document.getElementById("spinner").style.display = "none";
+                document.getElementById("loading-error").style.display = "block";
+                document.getElementById("error-message").innerText = error;
+                console.error(error)
+            });
         }
 
 

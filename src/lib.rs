@@ -1,8 +1,8 @@
-use std::{path::PathBuf, sync::Arc};
 use camera::{Camera, OrthographicProjection};
 use cmap::LinearSegmentedColorMap;
 use controller::CameraController;
 use renderer::{RenderSettings, VolumeRenderer};
+use std::{path::PathBuf, sync::Arc};
 use volume::VolumeGPU;
 
 #[cfg(target_arch = "wasm32")]
@@ -17,10 +17,13 @@ mod web;
 #[cfg(target_arch = "wasm32")]
 pub use web::*;
 
-
 use cgmath::Vector2;
 use winit::{
-    dpi::PhysicalSize, event::{DeviceEvent, ElementState, Event, WindowEvent}, event_loop::EventLoop, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowBuilder}
+    dpi::PhysicalSize,
+    event::{DeviceEvent, ElementState, Event, WindowEvent},
+    event_loop::EventLoop,
+    keyboard::{KeyCode, PhysicalKey},
+    window::{Window, WindowBuilder},
 };
 
 use crate::{
@@ -31,12 +34,12 @@ use crate::{
 pub mod camera;
 pub mod cmap;
 mod controller;
+pub mod offline;
 pub mod renderer;
 mod ui;
 mod ui_renderer;
-pub mod offline;
-pub mod volume;
 mod viewer;
+pub mod volume;
 pub use viewer::viewer;
 #[cfg(feature = "python")]
 pub mod py;
@@ -46,13 +49,13 @@ pub mod py;
 pub struct RenderConfig {
     pub no_vsync: bool,
     pub background_color: wgpu::Color,
-    pub show_colormap_editor:bool,
-    pub show_volume_info:bool,
-    pub vmin:Option<f32>,
-    pub vmax:Option<f32>,
-    pub distance_scale:f32,
+    pub show_colormap_editor: bool,
+    pub show_volume_info: bool,
+    pub vmin: Option<f32>,
+    pub vmax: Option<f32>,
+    pub distance_scale: f32,
     #[cfg(feature = "colormaps")]
-    pub show_cmap_select:bool,
+    pub show_cmap_select: bool,
     pub duration: Option<Duration>,
 }
 
@@ -63,14 +66,13 @@ pub struct WGPUContext {
 }
 
 impl WGPUContext {
-
     pub async fn new(instance: &wgpu::Instance, surface: Option<&wgpu::Surface<'static>>) -> Self {
         let adapter = wgpu::util::initialize_adapter_from_env_or_default(instance, surface)
             .await
             .unwrap();
 
         let required_features = wgpu::Features::default();
-        
+
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -91,8 +93,6 @@ impl WGPUContext {
     }
 }
 
-
-
 pub struct WindowContext {
     wgpu_context: WGPUContext,
     surface: wgpu::Surface<'static>,
@@ -112,18 +112,17 @@ pub struct WindowContext {
 
     render_settings: RenderSettings,
     cmap_gpu: cmap::ColorMapGPU,
-    cmap:LinearSegmentedColorMap,
+    cmap: LinearSegmentedColorMap,
 
+    playing: bool,
+    animation_duration: Duration,
+    num_columns: u32,
+    selected_channel: Option<usize>,
 
-    playing:bool,
-    animation_duration:Duration,
-    num_columns:u32,
-    selected_channel:Option<usize>,
-
-    colormap_editor_visible:bool,
-    volume_info_visible:bool,
+    colormap_editor_visible: bool,
+    volume_info_visible: bool,
     #[cfg(feature = "colormaps")]
-    cmap_select_visible:bool,
+    cmap_select_visible: bool,
 }
 
 impl WindowContext {
@@ -131,7 +130,7 @@ impl WindowContext {
     async fn new(
         window: Window,
         volumes: Vec<Volume>,
-        cmap:LinearSegmentedColorMap,
+        cmap: LinearSegmentedColorMap,
         render_config: &RenderConfig,
     ) -> anyhow::Result<Self> {
         let mut size = window.inner_size();
@@ -140,9 +139,10 @@ impl WindowContext {
         }
         let window = Arc::new(window);
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor{
-             backends: Backends::all().symmetric_difference(Backends::BROWSER_WEBGPU), 
-             ..Default::default() });
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: Backends::all().symmetric_difference(Backends::BROWSER_WEBGPU),
+            ..Default::default()
+        });
 
         let surface: wgpu::Surface = instance.create_surface(window.clone())?;
 
@@ -154,7 +154,7 @@ impl WindowContext {
         let queue = &wgpu_context.queue;
 
         let max_size = device.limits().max_texture_dimension_2d;
-        window.set_max_inner_size(Some(PhysicalSize::new(max_size,max_size)));
+        window.set_max_inner_size(Some(PhysicalSize::new(max_size, max_size)));
 
         let surface_caps = surface.get_capabilities(&wgpu_context.adapter);
 
@@ -194,9 +194,9 @@ impl WindowContext {
             spatial_filter: wgpu::FilterMode::Linear,
             temporal_filter: wgpu::FilterMode::Linear,
             distance_scale: render_config.distance_scale,
-            vmin:render_config.vmin,
-            vmax:render_config.vmax,
-            gamma_correction:!surface_format.is_srgb()
+            vmin: render_config.vmin,
+            vmax: render_config.vmax,
+            gamma_correction: !surface_format.is_srgb(),
         };
 
         let mut controller = CameraController::new(0.1, 0.05);
@@ -206,16 +206,21 @@ impl WindowContext {
         let ratio = size.width as f32 / size.height as f32;
         let camera = Camera::new_aabb_iso(
             volumes[0].aabb.clone(),
-            OrthographicProjection::new(Vector2::new(ratio,1.)*2.*radius, 1e-4, 100.)
+            OrthographicProjection::new(Vector2::new(ratio, 1.) * 2. * radius, 1e-4, 100.),
         );
 
-        let animation_duration = render_config.duration.unwrap_or(Duration::from_secs_f32(5.));
-        
-        let num_columns =  volumes.len().min(4) as u32;
-        let volumes_gpu = volumes.into_iter().map(|v| VolumeGPU::new(device, queue, v)).collect();
+        let animation_duration = render_config
+            .duration
+            .unwrap_or(Duration::from_secs_f32(5.));
 
-        let cmap_gpu = ColorMapGPU::new(&cmap, device, queue,COLORMAP_RESOLUTION);
-        Ok(Self {   
+        let num_columns = volumes.len().min(4) as u32;
+        let volumes_gpu = volumes
+            .into_iter()
+            .map(|v| VolumeGPU::new(device, queue, v))
+            .collect();
+
+        let cmap_gpu = ColorMapGPU::new(&cmap, device, queue, COLORMAP_RESOLUTION);
+        Ok(Self {
             wgpu_context,
             scale_factor: window.scale_factor() as f32,
             window,
@@ -227,7 +232,7 @@ impl WindowContext {
             background_color: render_config.background_color,
             camera,
 
-            volumes:volumes_gpu,
+            volumes: volumes_gpu,
             renderer,
             render_settings,
             cmap_gpu,
@@ -235,21 +240,26 @@ impl WindowContext {
             animation_duration,
             playing: true,
             num_columns,
-            selected_channel:None,
-            colormap_editor_visible:render_config.show_colormap_editor,
-            volume_info_visible:render_config.show_volume_info,
+            selected_channel: None,
+            colormap_editor_visible: render_config.show_colormap_editor,
+            volume_info_visible: render_config.show_volume_info,
             #[cfg(feature = "colormaps")]
-            cmap_select_visible:render_config.show_cmap_select,
+            cmap_select_visible: render_config.show_cmap_select,
         })
     }
 
-    fn load_file(&mut self, path: &PathBuf)->anyhow::Result<()> {
+    fn load_file(&mut self, path: &PathBuf) -> anyhow::Result<()> {
         let reader = std::fs::File::open(path)?;
         let volume = Volume::load_numpy(reader, true)?;
-        let volume_gpu = volume.into_iter().map(|v| VolumeGPU::new(&self.wgpu_context.device, &self.wgpu_context.queue, v)).collect();
+        let volume_gpu = volume
+            .into_iter()
+            .map(|v| VolumeGPU::new(&self.wgpu_context.device, &self.wgpu_context.queue, v))
+            .collect();
         self.volumes = volume_gpu;
         // self.controller.center = volume.aabb.center();
-        self.camera.projection.resize(self.config.width, self.config.height);
+        self.camera
+            .projection
+            .resize(self.config.width, self.config.height);
         Ok(())
     }
 
@@ -272,8 +282,8 @@ impl WindowContext {
 
     fn update(&mut self, dt: Duration) {
         self.controller.update_camera(&mut self.camera, dt);
-        
-        if self.playing && self.volumes[0].volume.timesteps > 1{
+
+        if self.playing && self.volumes[0].volume.timesteps > 1 {
             self.render_settings.time += dt.as_secs_f32() / self.animation_duration.as_secs_f32();
             self.render_settings.time = self.render_settings.time.fract();
         }
@@ -309,39 +319,44 @@ impl WindowContext {
         let ui_state = if self.ui_visible {
             self.ui_renderer.begin_frame(&self.window);
             ui::ui(self);
-    
-            let shapes = self.ui_renderer.end_frame(&self.window);
-            Some(self.ui_renderer.prepare( PhysicalSize {
-                width: output.texture.size().width,
-                height: output.texture.size().height,
-            },
-            self.scale_factor,
-            &self.wgpu_context.device,
-            &self.wgpu_context.queue,
-            &mut encoder,
-            shapes))
-        }else{None};
-       
 
-        if let Some(selected_channel) = self.selected_channel{
+            let shapes = self.ui_renderer.end_frame(&self.window);
+            Some(self.ui_renderer.prepare(
+                PhysicalSize {
+                    width: output.texture.size().width,
+                    height: output.texture.size().height,
+                },
+                self.scale_factor,
+                &self.wgpu_context.device,
+                &self.wgpu_context.queue,
+                &mut encoder,
+                shapes,
+            ))
+        } else {
+            None
+        };
+
+        if let Some(selected_channel) = self.selected_channel {
             let camera = self.camera.clone();
             frame_data.push(self.renderer.prepare(
                 &self.wgpu_context.device,
                 &self.volumes[selected_channel],
                 &camera,
                 &self.render_settings,
-                &self.cmap_gpu
+                &self.cmap_gpu,
             ));
-        }else{
-            for v in &self.volumes{
+        } else {
+            for v in &self.volumes {
                 let mut camera = self.camera.clone();
-                camera.projection.resize(cell_width as u32, cell_height as u32);
+                camera
+                    .projection
+                    .resize(cell_width as u32, cell_height as u32);
                 frame_data.push(self.renderer.prepare(
                     &self.wgpu_context.device,
                     &v,
                     &camera,
                     &self.render_settings,
-                    &self.cmap_gpu
+                    &self.cmap_gpu,
                 ));
             }
         }
@@ -359,27 +374,27 @@ impl WindowContext {
                 })],
                 ..Default::default()
             });
-            for (i,v) in frame_data.iter().enumerate(){
-                if self.selected_channel.is_none(){
+            for (i, v) in frame_data.iter().enumerate() {
+                if self.selected_channel.is_none() {
                     let column = i % columns;
                     let row = i / columns;
                     render_pass.set_viewport(
-                        column as f32 * cell_width, 
+                        column as f32 * cell_width,
                         row as f32 * cell_height,
                         cell_width,
-                        cell_height, 
-                        0., 1.);
+                        cell_height,
+                        0.,
+                        1.,
+                    );
                 }
-                self.renderer
-                    .render(&mut render_pass,  &v);
+                self.renderer.render(&mut render_pass, &v);
             }
-            
+
             if let Some(state) = &ui_state {
                 // ui rendering
 
-                self.ui_renderer.render(&mut render_pass,state);
+                self.ui_renderer.render(&mut render_pass, state);
             }
-
         }
         if let Some(ui_state) = ui_state {
             self.ui_renderer.cleanup(ui_state)
@@ -393,11 +408,13 @@ impl WindowContext {
     }
 }
 
-
-
-pub async fn open_window(window_builder:WindowBuilder,volumes: Vec<Volume>,cmap: LinearSegmentedColorMap,config: RenderConfig) {
+pub async fn open_window(
+    window_builder: WindowBuilder,
+    volumes: Vec<Volume>,
+    cmap: LinearSegmentedColorMap,
+    config: RenderConfig,
+) {
     let event_loop = EventLoop::new().unwrap();
-
 
     let version = env!("CARGO_PKG_VERSION");
     let name = env!("CARGO_PKG_NAME");
@@ -406,9 +423,10 @@ pub async fn open_window(window_builder:WindowBuilder,volumes: Vec<Volume>,cmap:
         .with_title(format!("{name} {version}"))
         .build(&event_loop)
         .unwrap();
-    
-    let mut state = WindowContext::new(window, volumes, cmap,&config).await.unwrap();
 
+    let mut state = WindowContext::new(window, volumes, cmap, &config)
+        .await
+        .unwrap();
 
     let mut last = Instant::now();
 

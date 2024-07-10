@@ -47,7 +47,12 @@ pollster = { version = "0.3.0", features = ["macro"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 
-web-sys = { version = "0.3.69", features = ["GpuColorDict"] }
+web-sys = { version = "0.3.69", features = ["GpuColorDict",'Headers',
+  'Request',
+  'RequestInit',
+  'RequestMode',
+  'Response',
+  'Window','Location','UrlSearchParams'] }
 rfd = { version = "0.14.1", features = ["file-handle-inner"] }
 getrandom = { version = "0.2", features = ["js"] }
 wasm-bindgen = "0.2.92"
