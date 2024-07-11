@@ -141,7 +141,7 @@ pub async fn download_file(window: web_sys::Window, url: String) -> Result<Vec<u
     let resp: Response = resp_value.dyn_into()?;
     if !resp.ok() {
         if resp.status() == 404 {
-            return Err(JsError::new("File not found (404)").into());
+            return Err(JsError::new(&format!("File not found (404): {url}")).into());
         } else {
             return Err(
                 JsError::new(&format!("Failed to download file: {}", resp.status_text())).into(),
@@ -155,6 +155,17 @@ pub async fn download_file(window: web_sys::Window, url: String) -> Result<Vec<u
     let byte_buffer = Uint8Array::new(&abuffer);
 
     Ok(byte_buffer.to_vec())
+}
+
+async fn load_colormap() -> Result<Option<Vec<u8>>,JsValue>{
+    let window = web_sys::window().ok_or(JsError::new("cannot access window"))?;
+    let search_string = window.location().search()?;
+    let file_param = web_sys::UrlSearchParams::new_with_str(&search_string)?.get("colormap");
+
+    return match file_param{
+        Some(url)=> download_file(window, url).await.map(|v|Some(v)),
+        None=> Ok(None)
+    } 
 }
 
 /// load volume data from a file file promt or url (HTTP Get parameter "file")
@@ -210,24 +221,33 @@ async fn start_viewer(
         .ok_or(JsError::new("cannot find loading spinner"))?
         .dyn_into::<web_sys::HtmlElement>()?;
 
-    spinner.set_attribute("style", "display:flex;")?;
-    wasm_bindgen_futures::spawn_local(async move {
-        let volume_data = match volume_data {
-            Some(data) => data,
-            None => load_data().await.unwrap(),
-        };
-        let colormap = match colormap {
-            Some(data) => GenericColorMap::read(Cursor::new(data))
-                .unwrap()
-                .into_linear_segmented(COLORMAP_RESOLUTION),
-            None => cmap::COLORMAPS["seaborn"]["icefire"]
-                .clone()
-                .into_linear_segmented(COLORMAP_RESOLUTION),
-        };
+    let overlay = document
+        .get_element_by_id("overlay")
+        .ok_or(JsError::new("cannot find overlay item"))?
+        .dyn_into::<web_sys::HtmlElement>()?;
 
+    spinner.set_attribute("style", "display:flex;")?;
+    let volume_data = match volume_data {
+        Some(data) => data,
+        None => load_data().await?
+    };
+    // load colormap from url if present
+    let colormap = match colormap {
+        Some(data) => Some(data),
+        None => load_colormap().await?
+    };
+    let colormap = match colormap {
+        Some(data) => GenericColorMap::read(Cursor::new(data)).map_err(|e| JsError::new(&format!("Failed to load colormap: {}", e)))?.into_linear_segmented(COLORMAP_RESOLUTION),
+        None => cmap::COLORMAPS["seaborn"]["icefire"]
+            .clone()
+            .into_linear_segmented(COLORMAP_RESOLUTION),
+    };
+
+    wasm_bindgen_futures::spawn_local(async move {
+    
         let reader_v = Cursor::new(volume_data);
         let volumes: Vec<Volume> = Volume::load_numpy(reader_v, true).unwrap();
-        spinner.set_attribute("style", "display:none;").ok();
+        overlay.set_attribute("style", "display:none;").ok();
 
         open_window(window_builder, volumes, colormap, render_config).await
     });

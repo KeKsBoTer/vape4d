@@ -17,7 +17,7 @@ mod web;
 #[cfg(target_arch = "wasm32")]
 pub use web::*;
 
-use cgmath::Vector2;
+use cgmath::{Vector2, Zero};
 use winit::{
     dpi::PhysicalSize,
     event::{DeviceEvent, ElementState, Event, WindowEvent},
@@ -429,9 +429,9 @@ pub async fn open_window(
         .unwrap();
 
     let mut last = Instant::now();
-
+    let mut last_touch_position = Vector2::zero();
     event_loop.run(move |event,target| 
-        
+       
         match event {
         Event::WindowEvent {
             ref event,
@@ -468,6 +468,23 @@ pub async fn open_window(
                     state.controller.process_scroll(p.y as f32 / 100.)
                 }
             },
+            WindowEvent::Touch(touch)=>{
+                match  touch.phase{
+                    winit::event::TouchPhase::Started=>{
+                        state.controller.left_mouse_pressed = true;
+                        last_touch_position = Vector2::new(touch.location.x, touch.location.y);
+                    }
+                    winit::event::TouchPhase::Ended=>{
+                        state.controller.left_mouse_pressed = false;
+                    }
+                    winit::event::TouchPhase::Moved=>{
+                        state.controller.process_mouse((touch.location.x-last_touch_position.x) as f32, (touch.location.y-last_touch_position.y) as f32);
+                        last_touch_position = Vector2::new(touch.location.x, touch.location.y);
+                    }
+                    _=>{}
+                    
+                }
+            }
             WindowEvent::MouseInput { state:button_state, button, .. }=>{
                 match button {
                     winit::event::MouseButton::Left =>                         state.controller.left_mouse_pressed = *button_state == ElementState::Pressed,

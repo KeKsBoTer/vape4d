@@ -19,6 +19,9 @@ struct Opt {
 
     #[cfg(not(feature = "colormaps"))]
     colormap: PathBuf,
+
+    #[cfg(feature = "colormaps")]
+    colormap: Option<PathBuf>,
 }
 
 pub async fn viewer<I, T>(args: I) -> anyhow::Result<()>
@@ -37,7 +40,13 @@ where
         .expect("Failed to load volume");
 
     #[cfg(feature = "colormaps")]
-    let cmap = cmap::COLORMAPS["seaborn"]["icefire"].clone();
+    let cmap = opt.colormap.map_or(
+        Ok(cmap::COLORMAPS["seaborn"]["icefire"].clone()),
+        |path| {
+            let reader = File::open(path)?;
+            cmap::GenericColorMap::read(reader)
+        },
+    )?;
     #[cfg(not(feature = "colormaps"))]
     let cmap = {
         let reader = File::open(&opt.colormap)?;

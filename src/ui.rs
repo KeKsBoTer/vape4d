@@ -313,6 +313,23 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     .on_hover_text("Drag anchor points to change transfer function.\nLeft-Click for new anchor point.\nRight-Click to delete anchor point.");
                 }
                 ui.end_row();
+                if ui.button("Save Colormap").clicked(){
+                    let cmap_data = serde_json::to_vec(&state.cmap).unwrap();
+                    #[cfg(target_arch = "wasm32")]
+                    wasm_bindgen_futures::spawn_local(async move{
+                        let file = rfd::AsyncFileDialog::new().set_file_name("colormap.json").save_file().await;
+                        if let Some(file) = file{
+                            file.write(&cmap_data).await.unwrap();
+                        }
+                    });
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let file = rfd::FileDialog::new().set_file_name("colormap.json").save_file();
+                        if let Some(file) = file {
+                            std::fs::write(file, cmap_data).unwrap();
+                        }
+                    }
+                }
             });
     }
     state
