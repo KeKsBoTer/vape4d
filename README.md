@@ -4,7 +4,7 @@
 [![Docs](https://img.shields.io/badge/docs-mkdocs-blue)
 ](https://keksboter.github.io/vape4d/docs/)
 
-[👉 Click to run the web app 👈](https://keksboter.github.io/vape4d)
+[👉 Click to run the web app 👈]([https://keksboter.github.io/vape4d](https://keksboter.github.io/vape4d/?file=https://huggingface.co/datasets/vollautomat/vape4d/resolve/main/gray_scott_3d.npy&colormap=https://huggingface.co/datasets/vollautomat/vape4d/resolve/main/colormap.json))
 
 ![Viewer screenshot](https://raw.githubusercontent.com/KeKsBoTer/vape4d/master/screenshot.png)
 
