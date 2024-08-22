@@ -292,6 +292,7 @@ pub struct RenderSettings {
 
     pub render_volume: bool,
     pub render_iso: bool,
+    pub render_iso_nearest: bool,
     pub iso_shininess: f32,
     pub iso_threshold: f32,
 
@@ -315,6 +316,7 @@ impl Default for RenderSettings {
             gamma_correction: false,
             render_volume: true,
             render_iso: false,
+            render_iso_nearest: false,
             iso_shininess: 20.0,
             iso_threshold: 0.5,
             iso_ambient_color: Vector3::zero(),
@@ -350,8 +352,10 @@ pub struct RenderSettingsUniform {
 
     render_volume: u32,
     render_iso: u32,
+    render_iso_nearest: u32,
     iso_shininess: f32,
     iso_threshold: f32,
+    pad0: u32, pad1: u32, pad2: u32,
 }
 impl RenderSettingsUniform {
     pub fn from_settings(settings: &RenderSettings, volume: &Volume) -> Self {
@@ -378,12 +382,14 @@ impl RenderSettingsUniform {
             gamma_correction: settings.gamma_correction as u32,
             render_volume: settings.render_volume as u32,
             render_iso: settings.render_iso as u32,
+            render_iso_nearest: settings.render_iso_nearest as u32,
             iso_shininess: settings.iso_shininess,
             iso_threshold: settings.iso_threshold,
             iso_ambient_color: settings.iso_ambient_color.extend(0.),
             iso_specular_color: settings.iso_specular_color.extend(0.),
             iso_light_color: settings.iso_light_color.extend(0.),
             iso_diffuse_color: settings.iso_diffuse_color,
+            pad0: 0, pad1: 0, pad2: 0,
         }
     }
 }
@@ -405,6 +411,7 @@ impl Default for RenderSettingsUniform {
             gamma_correction: 0,
             render_volume: 1,
             render_iso: 0,
+            render_iso_nearest: 0,
             iso_shininess: 20.0,
             iso_threshold: 0.5,
             iso_ambient_color: Vector4::zero(),
@@ -412,6 +419,10 @@ impl Default for RenderSettingsUniform {
             iso_specular_color: Vector4::new(1., 1., 1., 0.),
             iso_light_color: Vector4::new(1., 1., 1., 0.),
             iso_diffuse_color: Vector4::new(0.5, 0.5, 0.5, 0.),
+
+            pad0: 0,
+            pad1: 0,
+            pad2: 0,
         }
     }
 }

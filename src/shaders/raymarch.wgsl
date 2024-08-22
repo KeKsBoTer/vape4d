@@ -35,6 +35,7 @@ struct Settings {
 
     render_mode_volume: u32, // use volume rendering
     render_mode_iso: u32, // use iso rendering
+    render_mode_iso_nearest: u32, // use iso rendering
     iso_shininess: f32,
     iso_threshold: f32,
 }
@@ -167,6 +168,52 @@ fn phongBRDF(lightDir: vec3<f32>, viewDir: vec3<f32>, normal: vec3<f32>, phongDi
 }
 
 
+struct DDAState {
+    t_max: vec3<f32>,
+    t_delta: vec3<f32>,
+    step: vec3<i32>,
+    voxel_index: vec3<i32>,
+}
+
+fn next_pos_dda(pos: ptr<function,vec3<f32>>, step_size: ptr<function,f32>, ray_dir: vec3<f32>, state: ptr<function,DDAState>) -> vec3<f32> {
+    let aabb = settings.volume_aabb;
+    let aabb_size = aabb.max - aabb.min;
+
+    let sample_pos = (vec3<f32>((*state).voxel_index) + 0.5) / (vec3<f32>(textureDimensions(volume) - 1));
+    var step_size_local = 0.0;
+
+    var step_dir_curr: vec3<i32>;
+    if ((*state).t_max.x < (*state).t_max.y) {
+        if ((*state).t_max.x < (*state).t_max.z) {
+            (*state).voxel_index.x += (*state).step.x;
+            (*state).t_max.x += (*state).t_delta.x;
+            step_dir_curr = vec3<i32>((*state).step.x, 0, 0);
+            step_size_local += abs((*state).t_delta.x);
+          } else {
+            (*state).voxel_index.z += (*state).step.z;
+            (*state).t_max.z += (*state).t_delta.z;
+            step_dir_curr = vec3<i32>(0, 0, (*state).step.z);
+            step_size_local += abs((*state).t_delta.z);
+        }
+    } else {
+        if ((*state).t_max.y < (*state).t_max.z) {
+            (*state).voxel_index.y += (*state).step.y;
+            (*state).t_max.y += (*state).t_delta.y;
+            step_dir_curr = vec3<i32>(0, (*state).step.y, 0);
+            step_size_local += abs((*state).t_delta.y);
+        } else {
+            (*state).voxel_index.z += (*state).step.z;
+            (*state).t_max.z += (*state).t_delta.z;
+            step_dir_curr = vec3<i32>(0, 0, (*state).step.z);
+            step_size_local += abs((*state).t_delta.z);
+        }
+    }
+
+    *step_size = step_size_local;
+    *pos += ray_dir * (*step_size);
+
+    return sample_pos;
+}
 
 // traces ray trough volume and returns color
 fn trace_ray(ray_in: Ray) -> vec4<f32> {
@@ -184,6 +231,7 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
         return vec4<f32>(0.);
     }
 
+    let start_cam_pos = ray.orig;
     let start = max(0., intersec.x) + 1e-4;
     ray.orig += start * ray.dir;
 
@@ -198,19 +246,41 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
     var pos = ray.orig;
 
     let early_stopping_t = 1. / 255.;
-    let step_size_g = settings.step_size;
+    var step_size = settings.step_size;
     var sample_pos: vec3<f32> = next_pos(&pos, 0., ray.dir);
     var last_sample_pos = sample_pos;
     var last_sample = sample_volume(last_sample_pos);
 
+    var state: DDAState;
+    if bool(settings.render_mode_iso_nearest) {
+        let start_point = (ray.orig - aabb.min) / aabb_size * vec3<f32>(volume_size);
+        let end_point = (start_cam_pos + (intersec.y - 1e-4) * ray.dir - aabb.min) / aabb_size * vec3<f32>(volume_size);
+
+        for(var i: i32 = 0; i < 3; i += 1) {
+            state.step[i] = i32(sign(end_point[i] - start_point[i]));
+            if state.step[i] != 0 {
+                state.t_delta[i] = min(f32(state.step[i]) / (end_point[i] - start_point[i]), 1e7);
+            } else {
+                state.t_delta[i] = 1e7; // inf
+            }
+            if state.step[i] > 0 {
+                state.t_max[i] = state.t_delta[i] * (1.0 - fract(start_point[i]));
+            } else {
+                state.t_max[i] = state.t_delta[i] * fract(start_point[i]);
+            }
+            state.voxel_index[i] = i32(floor(start_point[i]));
+        }
+    }
+
     // used for iso surface rendering
     var first = true;
     var sign = 1.;
-    loop{
-
-        sample_pos = next_pos(&pos, step_size_g, ray.dir);
-        let step_size = step_size_g;
-
+    loop {
+        if bool(settings.render_mode_iso_nearest) {
+            sample_pos = next_pos_dda(&pos, &step_size, ray.dir, &state);
+        } else {
+            sample_pos = next_pos(&pos, step_size, ray.dir);
+        }
 
         let sample = sample_volume(sample_pos);
 

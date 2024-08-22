@@ -386,6 +386,9 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         ui.label("Color");
                         color_edit_button_rgba(ui, &mut state.render_settings.iso_diffuse_color);
                         ui.end_row();
+
+                        ui.checkbox(&mut state.render_settings.render_iso_nearest, "Filtering Nearest");
+                        ui.end_row();
                     });
 
                 ui.collapsing("Advanced", |ui| {
