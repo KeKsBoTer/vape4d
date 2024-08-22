@@ -22,7 +22,7 @@ impl<P: Projection> Camera<P> {
 
     pub fn new_aabb_iso(aabb: Aabb<f32>, projection: P) -> Self {
         let r = aabb.radius();
-        let corner = vec3(1., -1., 1.);
+        let corner = vec3(1., 1., 1.);
         let view_dir = Quaternion::look_at(-corner, Vector3::unit_y());
         Camera::new(
             aabb.center() + corner.normalize() * r * 2.8,
@@ -70,15 +70,6 @@ impl Projection for PerspectiveProjection {
         build_proj(self.znear, self.zfar, self.fovx, self.fovy)
     }
 }
-
-#[rustfmt::skip]
-pub const VIEWPORT_Y_FLIP: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
-    1.0, 0.0, 0.0, 0.0,
-    0.0, -1.0, 0.0, 0.0,
-    0.0, 0.0, 1.0, 0.,
-    0.0, 0.0, 0., 1.0,
-);
-
 impl PerspectiveProjection {
     pub fn new<F: Into<Rad<f32>>>(viewport: Vector2<u32>, fovy: F, znear: f32, zfar: f32) -> Self {
         let vr = viewport.x as f32 / viewport.y as f32;
@@ -117,23 +108,7 @@ pub fn world2view(r: impl Into<Matrix3<f32>>, t: Point3<f32>) -> Matrix4<f32> {
 }
 
 pub fn build_proj(znear: f32, zfar: f32, fov_x: Rad<f32>, fov_y: Rad<f32>) -> Matrix4<f32> {
-    let tan_half_fov_y = (fov_y / 2.).tan();
-    let tan_half_fov_x = (fov_x / 2.).tan();
-
-    let top = tan_half_fov_y * znear;
-    let bottom = -top;
-    let right = tan_half_fov_x * znear;
-    let left = -right;
-
-    let mut p = Matrix4::zero();
-    p[0][0] = 2.0 * znear / (right - left);
-    p[1][1] = 2.0 * znear / (top - bottom);
-    p[0][2] = (right + left) / (right - left);
-    p[1][2] = (top + bottom) / (top - bottom);
-    p[3][2] = 1.;
-    p[2][2] = zfar / (zfar - znear);
-    p[2][3] = -(zfar * znear) / (zfar - znear);
-    return p.transpose();
+   cgmath::perspective(fov_y, fov_x/fov_y, znear, zfar)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -172,9 +147,9 @@ impl Projection for OrthographicProjection {
         let mut p = Matrix4::zero();
         p[0][0] = 1. / right;
         p[1][1] = 1. / top;
-        p[2][2] = -2.0 / (self.zfar - self.znear);
-        p[2][3] = -(self.zfar + self.znear) / (self.zfar - self.znear);
+        p[2][2] = 2.0 / (self.zfar - self.znear);
+        p[3][2] = -(self.zfar + self.znear) / (self.zfar - self.znear);
         p[3][3] = 1.0;
-        return p.transpose();
+        return p;
     }
 }

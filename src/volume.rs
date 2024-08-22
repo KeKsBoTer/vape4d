@@ -3,7 +3,7 @@ use cgmath::{BaseNum, EuclideanSpace, MetricSpace, Point3, Vector3, Zero};
 use half::f16;
 #[cfg(target_arch = "wasm32")]
 use instant::Instant;
-use nifti::{InMemNiftiObject, NiftiObject, NiftiVolume};
+use nifti::{InMemNiftiObject, IntoNdArray, NiftiObject, NiftiVolume};
 use npyz::{npz, Deserialize, NpyFile};
 use num_traits::Float;
 #[cfg(feature = "python")]
@@ -161,6 +161,7 @@ impl Volume {
     where
         R: Read + Seek,
     {
+        let start = Instant::now();
         let mut buffer = [0; 4];
         reader.read_exact(&mut buffer)?;
         let is_npz = buffer == *b"\x50\x4B\x03\x04";
@@ -170,15 +171,16 @@ impl Volume {
         let is_nifti = buffer == *b"\x6E\x2B\x31\x00";
         reader.seek(std::io::SeekFrom::Start(0))?;
 
-        if is_nifti {
-            return Self::load_nifti(reader);
-        }
-
+        let volume = if is_nifti {
+            Self::load_nifti(reader)
+        }else 
         if is_npz {
             Self::load_npz(reader)
         } else {
             Self::load_npy(reader)
-        }
+        };
+        log::info!("loaded volume in {:?}", start.elapsed());
+        return volume;
     }
 
     pub fn load_npz<'a, R>(reader: R) -> anyhow::Result<Vec<Self>>
@@ -204,11 +206,12 @@ impl Volume {
         let volume = obj.into_volume();
         let shape = volume.dim().to_vec();
         let dim = volume.dimensionality();
-
-        let data = volume.into_nifti_typed_data::<f64>()?;
-
-        let min_value = data.iter().fold(f64::MAX, |a, &b| a.min(b)) as f32;
-        let mut max_value = data.iter().fold(f64::MIN, |a, &b| a.max(b)) as f32;
+        if dim != 3 {
+            anyhow::bail!("unsupported dimensionality: {}", dim);
+        }
+        let data = volume.into_ndarray::<f32>()?;
+        let min_value = data.iter().fold(f32::MAX, |a, &b| a.min(b)) as f32;
+        let mut max_value = data.iter().fold(f32::MIN, |a, &b| a.max(b)) as f32;
         if min_value == max_value {
             max_value = min_value + 1.0;
         }
@@ -222,37 +225,16 @@ impl Volume {
                 shape[2] as f32 / *res_min as f32,
             ),
         };
+        log::info!("volume shape is: {:?}, interpreted as [WxHxD]", shape);
 
-        match dim {
-            3 => {
-                log::info!("volume shape is: {:?}, interpreted as [WxHxD]", shape);
-
-                return Ok(vec![Self {
-                    timesteps: 1,
-                    resolution: Vector3::new(shape[2] as u32, shape[1] as u32, shape[0] as u32),
-                    aabb,
-                    min_value,
-                    max_value,
-                    data: data.iter().map(|v| f16::from_f64(*v)).collect(),
-                }]);
-            }
-            4 => {
-                log::info!("volume shape is: {:?}, interpreted as [TxWxHxD]", shape);
-                return Ok(vec![Self {
-                    timesteps: 1,
-                    resolution: Vector3::new(shape[2] as u32, shape[1] as u32, shape[0] as u32),
-                    aabb,
-                    min_value,
-                    max_value,
-                    data: data.iter().map(|v| f16::from_f64(*v)).collect(),
-                }]);
-            }
-            5 => {
-                log::info!("volume shape is: {:?}, interpreted as [TxCxWxHxD]", shape);
-                todo!("implement 5D volume");
-            }
-            _ => return Err(anyhow::format_err!("unsupported dimensionality: {}", dim)),
-        }
+        return Ok(vec![Self {
+            timesteps: 1,
+            resolution: Vector3::new(shape[2] as u32, shape[1] as u32, shape[0] as u32),
+            aabb,
+            min_value,
+            max_value,
+            data: data.as_standard_layout().as_slice().unwrap().iter().map(|&v| f16::from_f32(v)).collect(),
+        }]);
     }
 }
 

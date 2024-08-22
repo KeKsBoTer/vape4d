@@ -1,5 +1,7 @@
+use std::mem;
+
 use crate::{
-    camera::{Camera, Projection, VIEWPORT_Y_FLIP},
+    camera::{Camera, Projection},
     cmap::ColorMapGPU,
     volume::{Aabb, Volume, VolumeGPU},
 };
@@ -95,6 +97,7 @@ impl VolumeRenderer {
             contents: bytemuck::bytes_of(&CameraUniform::from(camera)),
             usage: wgpu::BufferUsages::UNIFORM,
         });
+        
 
         let settings_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("settnigs buffer"),
@@ -261,7 +264,7 @@ impl CameraUniform {
     }
 
     pub(crate) fn set_proj_mat(&mut self, proj_matrix: Matrix4<f32>) {
-        self.proj_matrix = VIEWPORT_Y_FLIP * proj_matrix;
+        self.proj_matrix =  proj_matrix;
         self.proj_inv_matrix = proj_matrix.invert().unwrap();
     }
 

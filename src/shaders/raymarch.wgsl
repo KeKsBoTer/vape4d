@@ -64,22 +64,20 @@ fn intersectAABB(ray: Ray, box_min: vec3<f32>, box_max: vec3<f32>) -> vec2<f32> 
 // ray is created based on view and proj matrix so
 // that it matches the rasterizer used for drawing other stuff
 fn create_ray(view_inv: mat4x4<f32>, proj_inv: mat4x4<f32>, px: vec2<f32>) -> Ray {
-    var far = vec4<f32>((px * 2. - (1.)), -1., 1.);
-    far.y *= -1.;
+    var far = vec4<f32>((px * 2. - (1.)), 1., 1.);
     // depth prepass location
     var far_w = view_inv * proj_inv * far;
-    far_w /= far_w.w + 1e-4;
+    far_w /= far_w.w + 1e-6;
 
 
-    var near = vec4<f32>((px * 2. - (1.)), 1., 1.);
-    near.y *= -1.;
+    var near = vec4<f32>((px * 2. - (1.)), -1., 1.);
     // depth prepass location
     var near_w = view_inv * proj_inv * near;
-    near_w /= near_w.w + 1e-4;
+    near_w /= near_w.w + 1e-6;
 
     return Ray(
         near_w.xyz,
-        normalize(far_w.xyz - near_w.xyz),
+        far_w.xyz - near_w.xyz,
     );
 }
 
@@ -170,9 +168,13 @@ fn phongBRDF(lightDir: vec3<f32>, viewDir: vec3<f32>, normal: vec3<f32>, phongDi
 
 // traces ray trough volume and returns color
 fn trace_ray(ray_in: Ray) -> vec4<f32> {
+    let ray_len = length(ray_in.dir);
+    var ray = ray_in;
+    ray.dir = normalize(ray.dir);
+
     let aabb = settings.volume_aabb;
     let aabb_size = aabb.max - aabb.min;
-    var ray = ray_in;
+    
     let slice_min = settings.clipping.min;
     let slice_max = settings.clipping.max;
     // find closest point on volume
@@ -211,8 +213,15 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
         sample_pos = next_pos(&pos, step_size_g, ray.dir);
         let step_size = step_size_g;
 
+        let slice_test = any(sample_pos < settings.clipping.min) || any(sample_pos > settings.clipping.max) ;
+
+        if slice_test || distance(ray_in.orig,pos) > ray_len || iters > 10000 {
+            break;
+        }
 
         let sample = sample_volume(sample_pos);
+
+        
 
         if bool(settings.render_mode_iso) {
             let iso_threshold = settings.iso_threshold;
@@ -265,11 +274,7 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
             break;
         }
         // check if within slice
-        let slice_test = any(sample_pos < settings.clipping.min) || any(sample_pos > settings.clipping.max) ;
 
-        if slice_test || iters > 10000 {
-            break;
-        }
         iters += 1u;
         last_sample = sample;
         last_sample_pos = sample_pos;
@@ -284,7 +289,7 @@ fn gamma_correction(color: vec4<f32>) -> vec4<f32> {
 
 @fragment
 fn fs_main(vertex_in: VertexOut) -> @location(0) vec4<f32> {
-    let r_pos = vec2<f32>(vertex_in.tex_coord.x, 1. - vertex_in.tex_coord.y);
+    let r_pos = vec2<f32>(vertex_in.tex_coord.x, vertex_in.tex_coord.y);
     let ray = create_ray(camera.view_inv, camera.proj_inv, r_pos);
     var color = trace_ray(ray);
     if settings.gamma_correction == 1u {

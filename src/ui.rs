@@ -5,8 +5,7 @@ use egui::{emath::Numeric, epaint::TextShape, vec2};
 use egui_plot::{Plot, PlotImage, PlotPoint};
 
 use crate::{
-    cmap::{ColorMap, COLORMAP_RESOLUTION},
-    WindowContext,
+    camera::{Camera, OrthographicCamera}, cmap::{ColorMap, COLORMAP_RESOLUTION}, WindowContext
 };
 
 #[cfg(feature = "colormaps")]
@@ -103,6 +102,20 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     ui.checkbox(&mut state.render_settings.render_volume, "Volume");
                     ui.checkbox(&mut state.render_settings.render_iso, "Iso Surface");
                 });
+
+                ui.end_row();
+                ui.label("Near Clip Plane");
+                let volume_aabb = state.volumes[0].volume.aabb;
+                let min_near = volume_aabb.center().distance(state.camera.position)-volume_aabb.radius();
+                let max_far = volume_aabb.center().distance(state.camera.position)+volume_aabb.radius();
+                let max_near = state.camera.projection.zfar.min(max_far);
+                let min_far = state.camera.projection.znear.min(max_near);
+                
+                ui.add(egui::Slider::new(&mut state.camera.projection.znear, min_near..=max_near));
+                ui.end_row();
+
+                ui.label("Far Clip plane");
+                ui.add(egui::Slider::new(&mut state.camera.projection.zfar, min_far..=max_far));
             });
         CollapsingHeader::new("Advanced").show_unindented(ui, |ui| {
             Grid::new("settings_advanced")
@@ -482,6 +495,8 @@ pub(crate) fn ui(state: &mut WindowContext) {
             ];
             let depth = vec![-x_axis.z, -y_axis.z, -z_axis.z];
             let draw_order = argsort(&depth);
+
+
             for i in draw_order.iter() {
                 let (axis, color, label) = axes[*i];
                 let pos = to_screen.transform_pos(pos2(axis.x, axis.y));
@@ -494,6 +509,11 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     painter.layout_no_wrap(label.to_string(), FontId::default(), color),
                     color,
                 ));
+                // bbox
+                let aabb = state.volumes[0].volume.aabb;    
+                let t = state.camera.view_matrix()*state.camera.proj_matrix();
+                let min_screen = t.transform_point(aabb.min);
+                let max_screen = t.transform_point(aabb.max);
             }
         });
 }
@@ -504,7 +524,7 @@ pub fn argsort<T: PartialOrd>(data: &[T]) -> Vec<usize> {
     indices
 }
 
-use cgmath::{Transform, Vector3, Vector4, Zero};
+use cgmath::{InnerSpace, MetricSpace, Point3, Transform, Vector2, Vector3, Vector4, Zero};
 use egui::{epaint::PathShape, *};
 
 pub fn tf_ui(ui: &mut Ui, points: &mut Vec<(f32, f32, f32)>) -> egui::Response {
@@ -705,4 +725,3 @@ pub fn color_edit_button_rgba(ui: &mut Ui, rgb: &mut Vector4<f32>) -> Response {
     rgb[3] = rgba[3];
     response
 }
-

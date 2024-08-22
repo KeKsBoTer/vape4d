@@ -59,3 +59,9 @@ plt.savefig("test.png", bbox_inches="tight", pad_inches=0)
 plt.show()
 ```
 
+
+# View Development (Rust)
+
+1. Install python and `matplotlib`,`seaborn` and `cmasher`
+2. Run `python colormaps.py` to generate the colormaps
+3. Run the viewer with `cargo run --bin vape3d --features colormaps <volume_file>`
