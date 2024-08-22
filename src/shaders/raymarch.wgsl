@@ -36,6 +36,7 @@ struct Settings {
     render_mode_volume: u32, // use volume rendering
     render_mode_iso: u32, // use iso rendering
     render_mode_iso_nearest: u32, // use iso rendering
+    use_cube_surface_grad: u32, // whether to use cube surface gradients for render_mode_iso_nearest
     iso_shininess: f32,
     iso_threshold: f32,
 }
@@ -57,9 +58,9 @@ fn intersectAABB(ray: Ray, box_min: vec3<f32>, box_max: vec3<f32>) -> vec2<f32> 
     let tMax = (box_max - ray.orig) / ray.dir;
     let t1 = min(tMin, tMax);
     let t2 = max(tMin, tMax);
-    let tNear = max(max(t1.x, t1.y), t1.z);
-    let tFar = min(min(t2.x, t2.y), t2.z);
-    return vec2<f32>(tNear, tFar);
+    let t_near = max(max(t1.x, t1.y), t1.z);
+    let t_far = min(min(t2.x, t2.y), t2.z);
+    return vec2<f32>(t_near, t_far);
 }
 
 // ray is created based on view and proj matrix so
@@ -173,47 +174,98 @@ struct DDAState {
     t_delta: vec3<f32>,
     step: vec3<i32>,
     voxel_index: vec3<i32>,
+    step_dir_curr: vec3<i32>,
 }
 
-fn next_pos_dda(pos: ptr<function,vec3<f32>>, step_size: ptr<function,f32>, ray_dir: vec3<f32>, state: ptr<function,DDAState>) -> vec3<f32> {
+fn get_voxel_segment_length(ray_origin: vec3<f32>, ray_direction: vec3<f32>, voxel_index: vec3<i32>) -> f32 {
+    let lower = vec3<f32>(voxel_index);
+    let upper = vec3<f32>(voxel_index + 1);
+    var t_near = -1e7;
+    var t_far = 1e7;
+    for (var i: i32 = 0; i < 3; i += 1) {
+        if abs(ray_direction[i]) < 1e-4 {
+            if ray_origin[i] < lower[i] || ray_origin[i] > upper[i] {
+                return 0.0;
+            }
+        } else {
+            var t0 = (lower[i] - ray_origin[i]) / ray_direction[i];
+            var t1 = (upper[i] - ray_origin[i]) / ray_direction[i];
+            if (t0 > t1) {
+                let tmp = t0;
+                t0 = t1;
+                t1 = tmp;
+            }
+            if t0 > t_near {
+                t_near = t0;
+            }
+            if t1 < t_far {
+                t_far = t1;
+            }
+            if t_near > t_far || t_far < 0 {
+                return 0.0;
+            }
+        }
+    }
+    return t_far - t_near;
+}
+
+fn next_pos_dda(
+        pos: ptr<function,vec3<f32>>, step_size: ptr<function,f32>, ray_orig: vec3<f32>, ray_dir: vec3<f32>,
+        state: ptr<function,DDAState>) -> vec3<f32> {
     let aabb = settings.volume_aabb;
     let aabb_size = aabb.max - aabb.min;
 
-    let sample_pos = (vec3<f32>((*state).voxel_index) + 0.5) / (vec3<f32>(textureDimensions(volume) - 1));
-    var step_size_local = 0.0;
+    let sample_pos = (vec3<f32>((*state).voxel_index) + 0.5) / vec3<f32>(textureDimensions(volume));
 
-    var step_dir_curr: vec3<i32>;
+    *step_size = get_voxel_segment_length(ray_orig, ray_dir, (*state).voxel_index) / f32(textureDimensions(volume).x) * aabb_size.x;
+
     if ((*state).t_max.x < (*state).t_max.y) {
         if ((*state).t_max.x < (*state).t_max.z) {
             (*state).voxel_index.x += (*state).step.x;
             (*state).t_max.x += (*state).t_delta.x;
-            step_dir_curr = vec3<i32>((*state).step.x, 0, 0);
-            step_size_local += abs((*state).t_delta.x);
+            (*state).step_dir_curr = vec3<i32>((*state).step.x, 0, 0);
           } else {
             (*state).voxel_index.z += (*state).step.z;
             (*state).t_max.z += (*state).t_delta.z;
-            step_dir_curr = vec3<i32>(0, 0, (*state).step.z);
-            step_size_local += abs((*state).t_delta.z);
+            (*state).step_dir_curr = vec3<i32>(0, 0, (*state).step.z);
         }
     } else {
         if ((*state).t_max.y < (*state).t_max.z) {
             (*state).voxel_index.y += (*state).step.y;
             (*state).t_max.y += (*state).t_delta.y;
-            step_dir_curr = vec3<i32>(0, (*state).step.y, 0);
-            step_size_local += abs((*state).t_delta.y);
+            (*state).step_dir_curr = vec3<i32>(0, (*state).step.y, 0);
         } else {
             (*state).voxel_index.z += (*state).step.z;
             (*state).t_max.z += (*state).t_delta.z;
-            step_dir_curr = vec3<i32>(0, 0, (*state).step.z);
-            step_size_local += abs((*state).t_delta.z);
+            (*state).step_dir_curr = vec3<i32>(0, 0, (*state).step.z);
         }
     }
 
-    *step_size = step_size_local;
     *pos += ray_dir * (*step_size);
 
     return sample_pos;
 }
+
+fn intersect_aabb_dir(ray_origin: vec3<f32>, ray_direction: vec3<f32>, lower: vec3<f32>, upper: vec3<f32>) -> i32 {
+    var dir = 0;
+    var t_near_best = -1e7;
+    for (var i: i32 = 0; i < 3; i += 1) {
+        var t0 = (lower[i] - ray_origin[i]) / ray_direction[i];
+        var t1 = (upper[i] - ray_origin[i]) / ray_direction[i];
+        if (t0 > t1) {
+            let tmp = t0;
+            t0 = t1;
+            t1 = tmp;
+        }
+        let t_near = t0;
+        if t_near > t_near_best {
+            t_near_best = t_near;
+            dir = i;
+        }
+    }
+    return dir;
+}
+
 
 // traces ray trough volume and returns color
 fn trace_ray(ray_in: Ray) -> vec4<f32> {
@@ -252,11 +304,12 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
     var last_sample = sample_volume(last_sample_pos);
 
     var state: DDAState;
+    var start_point: vec3<f32>;
     if bool(settings.render_mode_iso_nearest) {
-        let start_point = (ray.orig - aabb.min) / aabb_size * vec3<f32>(volume_size);
+        start_point = (ray.orig - aabb.min) / aabb_size * vec3<f32>(volume_size);
         let end_point = (start_cam_pos + (intersec.y - 1e-4) * ray.dir - aabb.min) / aabb_size * vec3<f32>(volume_size);
 
-        for(var i: i32 = 0; i < 3; i += 1) {
+        for (var i: i32 = 0; i < 3; i += 1) {
             state.step[i] = i32(sign(end_point[i] - start_point[i]));
             if state.step[i] != 0 {
                 state.t_delta[i] = min(f32(state.step[i]) / (end_point[i] - start_point[i]), 1e7);
@@ -270,6 +323,10 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
             }
             state.voxel_index[i] = i32(floor(start_point[i]));
         }
+
+        state.step_dir_curr = vec3<i32>(0, 0, 0);
+        let dir_init = intersect_aabb_dir(start_point, ray.dir, aabb_min, aabb_max);
+        state.step_dir_curr[dir_init] = state.step[dir_init];
     }
 
     // used for iso surface rendering
@@ -277,7 +334,7 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
     var sign = 1.;
     loop {
         if bool(settings.render_mode_iso_nearest) {
-            sample_pos = next_pos_dda(&pos, &step_size, ray.dir, &state);
+            sample_pos = next_pos_dda(&pos, &step_size, start_point, ray.dir, &state);
         } else {
             sample_pos = next_pos(&pos, step_size, ray.dir);
         }
@@ -292,8 +349,13 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
                 let t = (iso_threshold - last_sample) / (sample - last_sample + 1e-4);
                 let intersection = mix(last_sample_pos, sample_pos.xyz, t);
 
-                let gradient = sample_volume_gradient(intersection);
-                let n = -sign * normalize(gradient);
+                var n: vec3<f32>;
+                if bool(settings.use_cube_surface_grad) {
+                    n = vec3<f32>(state.step_dir_curr);
+                } else {
+                    let gradient = sample_volume_gradient(intersection);
+                    n = -sign * normalize(gradient);
+                }
                 let light_dir = normalize(ray.dir + vec3<f32>(0.1));
                 let view_dir = ray.dir;
 

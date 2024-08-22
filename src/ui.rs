@@ -388,7 +388,14 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         ui.end_row();
 
                         ui.checkbox(&mut state.render_settings.render_iso_nearest, "Filtering Nearest");
+                        if !state.render_settings.render_iso_nearest {
+                            state.render_settings.use_cube_surface_grad = false;
+                        }
                         ui.end_row();
+                        if state.render_settings.render_iso_nearest {
+                            ui.checkbox(&mut state.render_settings.use_cube_surface_grad, "Use Cube Surface Normal");
+                            ui.end_row();
+                        }
                     });
 
                 ui.collapsing("Advanced", |ui| {
