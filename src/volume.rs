@@ -157,7 +157,7 @@ impl Volume {
             d => anyhow::bail!("unsupported type {:}", d.descr()),
         }
     }
-    pub fn load<'a, R>(mut reader: R) -> anyhow::Result<Vec<Self>>
+    pub fn load<'a, R>(mut reader: R) -> anyhow::Result<Self>
     where
         R: Read + Seek,
     {
@@ -171,16 +171,17 @@ impl Volume {
         let is_nifti = buffer == *b"\x6E\x2B\x31\x00";
         reader.seek(std::io::SeekFrom::Start(0))?;
 
-        let volume = if is_nifti {
+        let mut volume = if is_nifti {
             Self::load_nifti(reader)
         }else 
         if is_npz {
             Self::load_npz(reader)
         } else {
             Self::load_npy(reader)
-        };
+        }?;
         log::info!("loaded volume in {:?}", start.elapsed());
-        return volume;
+        assert_eq!(volume.len(),1);
+        return Ok(volume.pop().unwrap());
     }
 
     pub fn load_npz<'a, R>(reader: R) -> anyhow::Result<Vec<Self>>

@@ -167,7 +167,7 @@ fn phongBRDF(lightDir: vec3<f32>, viewDir: vec3<f32>, normal: vec3<f32>, phongDi
 
 
 // traces ray trough volume and returns color
-fn trace_ray(ray_in: Ray) -> vec4<f32> {
+fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
     let ray_len = length(ray_in.dir);
     var ray = ray_in;
     ray.dir = normalize(ray.dir);
@@ -204,6 +204,10 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
     var sample_pos: vec3<f32> = next_pos(&pos, 0., ray.dir);
     var last_sample_pos = sample_pos;
     var last_sample = sample_volume(last_sample_pos);
+    var normal = vec3<f32>(0.);
+    var depth = 0.;
+
+    let cam_pos = camera.view_inv[3].xyz;
 
     // used for iso surface rendering
     var first = true;
@@ -214,7 +218,6 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
         let step_size = step_size_g;
 
         let slice_test = any(sample_pos < settings.clipping.min) || any(sample_pos > settings.clipping.max) ;
-
         if slice_test || distance(ray_in.orig,pos) > ray_len || iters > 10000 {
             break;
         }
@@ -222,7 +225,6 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
         let sample = sample_volume(sample_pos);
 
         
-
         if bool(settings.render_mode_iso) {
             let iso_threshold = settings.iso_threshold;
             let new_sign = sign(sample - iso_threshold);
@@ -232,7 +234,7 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
                 let intersection = mix(last_sample_pos, sample_pos.xyz, t);
 
                 let gradient = sample_volume_gradient(intersection);
-                let n = -sign * normalize(gradient);
+                normal = -sign * normalize(gradient);
                 let light_dir = normalize(ray.dir + vec3<f32>(0.1));
                 let view_dir = ray.dir;
 
@@ -245,14 +247,18 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
 
                 var radiance = ambient_color;
 
-                let irradiance = max(dot(light_dir, n), 0.0) * irradi_perp;
+                let irradiance = max(dot(light_dir, normal), 0.0) * irradi_perp;
                 if irradiance > 0.0 {
-                    let brdf = phongBRDF(light_dir, view_dir, n, diffuse_color.rgb, specular_color, shininess);
+                    let brdf = phongBRDF(light_dir, view_dir, normal, diffuse_color.rgb, specular_color, shininess);
                     radiance += brdf * irradiance * light_color;
                 }
-                let a = diffuse_color.a;
+
+                depth = distance(cam_pos,pos);
+                let a = 1.; // always fully opaque //diffuse_color.a;
                 color += transmittance * a * radiance;
                 transmittance *= 1. - a;
+
+                break;
             }
 
             first = false;
@@ -279,6 +285,7 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
         last_sample = sample;
         last_sample_pos = sample_pos;
     }
+    *normal_depth = vec4<f32>(normal,depth);
     return vec4<f32>(color, 1. - transmittance);
 }
 
@@ -287,15 +294,21 @@ fn gamma_correction(color: vec4<f32>) -> vec4<f32> {
 }
 
 
+struct FragmentOut{
+    @location(0) color:vec4<f32>,
+    @location(1) normal_depth:vec4<f32>,
+}
+
 @fragment
-fn fs_main(vertex_in: VertexOut) -> @location(0) vec4<f32> {
+fn fs_main(vertex_in: VertexOut) -> FragmentOut {
     let r_pos = vec2<f32>(vertex_in.tex_coord.x, vertex_in.tex_coord.y);
     let ray = create_ray(camera.view_inv, camera.proj_inv, r_pos);
-    var color = trace_ray(ray);
+    var normal_depth = vec4<f32>(0.);
+    var color = trace_ray(ray,&normal_depth);
     if settings.gamma_correction == 1u {
         color = fromLinear(color);
     }
-    return color;
+    return FragmentOut(color,normal_depth);
 }
 
 

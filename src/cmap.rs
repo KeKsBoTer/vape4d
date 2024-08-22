@@ -361,10 +361,10 @@ impl LinearSegmentedColorMap {
         }
 
         // merge neighboring points with the same alpha value
-        merge_neighbours(&mut r);
-        merge_neighbours(&mut g);
-        merge_neighbours(&mut b);
-        merge_neighbours(&mut a);
+        merge_neighbors(&mut r);
+        merge_neighbors(&mut g);
+        merge_neighbors(&mut b);
+        merge_neighbors(&mut a);
 
         Self {
             r,
@@ -419,6 +419,7 @@ impl ColorMap for &LinearSegmentedColorMap {
         LinearSegmentedColorMap { r, g, b, a }
     }
 }
+
 impl Hash for LinearSegmentedColorMap {
     fn hash<H: Hasher>(&self, state: &mut H) {
         for c in [&self.r, &self.g, &self.b].iter() {
@@ -438,6 +439,7 @@ impl Hash for LinearSegmentedColorMap {
     }
 }
 
+// converts a spline into an image with a given resolution
 pub fn rasterize_tf(points: &[(f32, f32, f32)], n: u32) -> Vec<u8> {
     assert!(points.len() >= 2, "spline must have at least 2 points");
     let mut values = vec![0; n as usize];
@@ -461,6 +463,7 @@ pub fn rasterize_tf(points: &[(f32, f32, f32)], n: u32) -> Vec<u8> {
     values
 }
 
+// samples a spline described by a list of points (x,y0,y1)
 fn sample_channel(x: f32, values: &[(f32, f32, f32)]) -> f32 {
     for i in 0..values.len() - 1 {
         let (x0, _, y0) = values[i];
@@ -472,7 +475,9 @@ fn sample_channel(x: f32, values: &[(f32, f32, f32)]) -> f32 {
     return 0.0;
 }
 
-fn merge_neighbours(values: &mut Vec<(f32, f32, f32)>) {
+/// removes points in a spline with the same y values
+/// list contains points (x,y0,y1) where y0 ist the value before x and y1 the value after
+fn merge_neighbors(values: &mut Vec<(f32, f32, f32)>) {
     let mut i = 1;
     while i < values.len() - 1 {
         let (_, y0, y1) = values[i];

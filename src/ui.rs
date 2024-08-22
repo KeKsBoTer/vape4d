@@ -13,7 +13,7 @@ use crate::cmap::COLORMAPS;
 
 pub(crate) fn ui(state: &mut WindowContext) {
     let ctx = state.ui_renderer.winit.egui_ctx();
-    let with_animation = state.volumes[0].volume.timesteps > 1;
+    let with_animation = state.volume.volume.timesteps > 1;
     egui::Window::new("Render Settings").show(ctx, |ui| {
         egui::Grid::new("render_settings")
             .num_columns(2)
@@ -65,35 +65,6 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     a: bg[3] as f64,
                 };
                 ui.end_row();
-                if state.volumes.len() > 1 {
-                    ui.label("Channel");
-                    egui::ComboBox::new("selected_channel", "")
-                        .selected_text(
-                            state
-                                .selected_channel
-                                .map_or("All".to_string(), |v| v.to_string()),
-                        )
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut state.selected_channel, None, "All");
-                            for i in 0..state.volumes.len() {
-                                ui.selectable_value(
-                                    &mut state.selected_channel,
-                                    Some(i),
-                                    format!("{}", i),
-                                );
-                            }
-                        });
-                    ui.end_row();
-                    if state.selected_channel.is_none() {
-                        ui.label("Number of Rows");
-                        let max_rows = state.volumes.len();
-                        ui.add(
-                            egui::DragValue::new(&mut state.num_columns)
-                                .range(1u32..=max_rows as u32),
-                        );
-                        ui.end_row();
-                    }
-                }
 
                 ui.with_layout(Layout::top_down(Align::Min), |ui| {
                     ui.add(egui::Label::new("Rendering Modes").wrap_mode(TextWrapMode::Extend));
@@ -105,7 +76,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
 
                 ui.end_row();
                 ui.label("Near Clip Plane");
-                let volume_aabb = state.volumes[0].volume.aabb;
+                let volume_aabb = state.volume.volume.aabb;
                 let min_near = volume_aabb.center().distance(state.camera.position)-volume_aabb.radius();
                 let max_far = volume_aabb.center().distance(state.camera.position)+volume_aabb.radius();
                 let max_near = state.camera.projection.zfar.min(max_far);
@@ -136,7 +107,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         )
                     });
                     ui.vertical(|ui| {
-                        if state.volumes[0].volume.timesteps > 1 { 
+                        if state.volume.volume.timesteps > 1 { 
                             egui::ComboBox::new("temporal_interpolation", "Time")
                                 .selected_text(match state.render_settings.temporal_filter {
                                     wgpu::FilterMode::Nearest => "Nearest",
@@ -206,14 +177,14 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         let min_b = state
                         .render_settings
                         .vmin
-                        .unwrap_or(state.volumes[0].volume.min_value);
+                        .unwrap_or(state.volume.volume.min_value);
                         let max_b = state
                             .render_settings
                             .vmax
-                            .unwrap_or(state.volumes[0].volume.max_value);
+                            .unwrap_or(state.volume.volume.max_value);
 
-                        let vmin_min = state.volumes[0].volume.min_value.min(min_b);
-                        let vmax_max = state.volumes[0].volume.max_value.max(max_b);
+                        let vmin_min = state.volume.volume.min_value.min(min_b);
+                        let vmax_max = state.volume.volume.max_value.max(max_b);
                         ui.horizontal(|ui| {
                             ui.add(egui::Label::new("Min"));
                             optional_drag(
@@ -314,11 +285,11 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 let vmin = state
                     .render_settings
                     .vmin
-                    .unwrap_or(state.volumes[0].volume.min_value);
+                    .unwrap_or(state.volume.volume.min_value);
                 let vmax = state
                     .render_settings
                     .vmax
-                    .unwrap_or(state.volumes[0].volume.max_value);
+                    .unwrap_or(state.volume.volume.max_value);
                 ui.add(egui::Label::new(egui::RichText::new("Preview").strong()));
                 ui.end_row();
                 show_cmap(ui, egui::Id::new("cmap preview"), &state.cmap, vmin, vmax);
@@ -389,8 +360,8 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         ui.add(
                             egui::DragValue::new(&mut state.render_settings.iso_threshold)
                                 .range(
-                                    state.volumes[0].volume.min_value
-                                        ..=state.volumes[0].volume.max_value, // TODO use all volume for vmin vmax
+                                    state.volume.volume.min_value
+                                        ..=state.volume.volume.max_value, // TODO use all volume for vmin vmax
                                 )
                                 .speed(0.1),
                         );
@@ -398,6 +369,10 @@ pub(crate) fn ui(state: &mut WindowContext) {
 
                         ui.label("Color");
                         color_edit_button_rgba(ui, &mut state.render_settings.iso_diffuse_color);
+                        ui.end_row();
+
+                        ui.label("SSAO");
+                        ui.checkbox(&mut state.render_settings.ssao, "");
                         ui.end_row();
                     });
 
@@ -438,19 +413,16 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 .striped(true)
                 .show(ui, |ui| {
                     ui.label("Timesteps");
-                    ui.label(state.volumes[0].volume.timesteps.to_string());
-                    ui.end_row();
-                    ui.label("Channels");
-                    ui.label(state.volumes.len().to_string());
+                    ui.label(state.volume.volume.timesteps.to_string());
                     ui.end_row();
                     ui.label("Resolution");
-                    let res = state.volumes[0].volume.resolution;
+                    let res = state.volume.volume.resolution;
                     ui.label(format!("{}x{}x{} (WxHxD)", res.x, res.y, res.z));
                     ui.end_row();
                     ui.label("Value range");
                     ui.label(format!(
                         "[{} , {}]",
-                        state.volumes[0].volume.min_value, state.volumes[0].volume.max_value
+                        state.volume.volume.min_value, state.volume.volume.max_value
                     ));
                     ui.end_row();
                 });
@@ -510,12 +482,60 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     color,
                 ));
                 // bbox
-                let aabb = state.volumes[0].volume.aabb;    
+                let aabb = state.volume.volume.aabb;    
                 let t = state.camera.view_matrix()*state.camera.proj_matrix();
                 let min_screen = t.transform_point(aabb.min);
                 let max_screen = t.transform_point(aabb.max);
             }
         });
+        egui::Area::new(egui::Id::new("bbox"))
+            .anchor(Align2::LEFT_BOTTOM, Vec2::new(0., 0.))
+            .interactable(false)
+            .order(Order::Background)
+            .show(ctx, |ui| {
+                let (response, painter) = ui.allocate_painter(
+                    vec2(frame_rect.width(), frame_rect.height()),
+                    Sense {
+                        click: false,
+                        drag: false,
+                        focusable: false,
+                    },
+                );
+    
+                let to_screen = emath::RectTransform::from_to(
+                    Rect::from_two_pos(Pos2::new(-1.0, -1.0), Pos2::new(1.0, 1.0)),
+                    response.rect,
+                );
+                 // bbox
+                 let aabb = state.volume.volume.aabb;    
+                 let t = state.camera.proj_matrix()*state.camera.view_matrix();
+                 {
+                    let min_screen = t.transform_point(aabb.min);
+                    let max_screen = t.transform_point(Point3::new(aabb.min.x, aabb.min.y, aabb.max.z));
+                    painter.add(PathShape::line(
+                        vec![to_screen.transform_pos(pos2(min_screen.x, min_screen.y)), to_screen.transform_pos(pos2(max_screen.x, max_screen.y))],
+                        Stroke::new(3., egui::Color32::BLUE),
+                    ));
+                }
+                {
+                    let min_screen = t.transform_point(aabb.min);
+                    let max_screen = t.transform_point(Point3::new(aabb.max.x, aabb.min.y, aabb.min.z));
+                    painter.add(PathShape::line(
+                        vec![to_screen.transform_pos(pos2(min_screen.x, min_screen.y)), to_screen.transform_pos(pos2(max_screen.x, max_screen.y))],
+                        Stroke::new(3., egui::Color32::RED),
+                    ));
+                }
+                {
+                    let min_screen = t.transform_point(aabb.min);
+                    let max_screen = t.transform_point(Point3::new(aabb.min.x, aabb.max.y, aabb.min.z));
+                    painter.add(PathShape::line(
+                        vec![to_screen.transform_pos(pos2(min_screen.x, min_screen.y)), to_screen.transform_pos(pos2(max_screen.x, max_screen.y))],
+                        Stroke::new(3., egui::Color32::GREEN),
+                    ));
+                }
+            });
+
+
 }
 
 pub fn argsort<T: PartialOrd>(data: &[T]) -> Vec<usize> {

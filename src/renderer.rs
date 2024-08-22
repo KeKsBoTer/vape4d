@@ -1,5 +1,3 @@
-use std::mem;
-
 use crate::{
     camera::{Camera, Projection},
     cmap::ColorMapGPU,
@@ -44,6 +42,11 @@ impl VolumeRenderer {
                 targets: &[Some(wgpu::ColorTargetState {
                     format: color_format,
                     blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                }),
+                Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
@@ -109,6 +112,7 @@ impl VolumeRenderer {
         });
 
         let step = ((volume.volume.timesteps - 1) as f32 * render_settings.time) as usize;
+        // TODO maybe create all bindgroups once and not on the fly per frame
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("volume renderer bind group"),
             layout: &Self::bind_group_layout(device),
@@ -302,6 +306,8 @@ pub struct RenderSettings {
     pub iso_specular_color: Vector3<f32>,
     pub iso_light_color: Vector3<f32>,
     pub iso_diffuse_color: Vector4<f32>,
+
+    pub ssao:bool
 }
 
 impl Default for RenderSettings {
@@ -316,14 +322,15 @@ impl Default for RenderSettings {
             vmin: None,
             vmax: None,
             gamma_correction: false,
-            render_volume: true,
-            render_iso: false,
+            render_volume: false,
+            render_iso: true,
             iso_shininess: 20.0,
             iso_threshold: 0.5,
             iso_ambient_color: Vector3::zero(),
             iso_specular_color: Vector3::new(0.7, 0.7, 0.7),
             iso_light_color: Vector3::new(1., 1., 1.),
             iso_diffuse_color: Vector4::new(0.8, 0.8, 0.8, 1.0),
+            ssao:true,
         }
     }
 }
