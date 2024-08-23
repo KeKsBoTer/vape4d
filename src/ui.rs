@@ -5,7 +5,8 @@ use egui::{emath::Numeric, epaint::TextShape, vec2};
 use egui_plot::{Plot, PlotImage, PlotPoint};
 
 use crate::{
-    camera::{Camera, OrthographicCamera}, cmap::{ColorMap, COLORMAP_RESOLUTION}, WindowContext
+    cmap::{ColorMap, COLORMAP_RESOLUTION},
+    WindowContext,
 };
 
 #[cfg(feature = "colormaps")]
@@ -77,16 +78,26 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 ui.end_row();
                 ui.label("Near Clip Plane");
                 let volume_aabb = state.volume.volume.aabb;
-                let min_near = volume_aabb.center().distance(state.camera.position)-volume_aabb.radius();
-                let max_far = volume_aabb.center().distance(state.camera.position)+volume_aabb.radius();
-                let max_near = state.camera.projection.zfar.min(max_far);
-                let min_far = state.camera.projection.znear.min(max_near);
-                
-                ui.add(egui::Slider::new(&mut state.camera.projection.znear, min_near..=max_near));
+
+                // find the distance from the camera to the aabb center in camera z direction
+                let h = volume_aabb.center() - state.camera.position;
+                let c = state.camera.view_direction();
+                let a = h.angle(c).cos()*h.magnitude();
+
+                let min_near = a-volume_aabb.radius();
+                let max_far = a+volume_aabb.radius();
+                let max_near = state.camera.projection.zfar;
+                let min_far = state.camera.projection.znear;
+                ui.add(egui::Slider::new(&mut state.camera.projection.znear, min_near..=max_near).clamp_to_range(true));
                 ui.end_row();
 
-                ui.label("Far Clip plane");
-                ui.add(egui::Slider::new(&mut state.camera.projection.zfar, min_far..=max_far));
+                ui.label("Far Clip Plane");
+                ui.add(egui::Slider::new(&mut state.camera.projection.zfar, min_far..=max_far).clamp_to_range(true));
+
+                // workaround until clamp_to_range works with sliders again
+
+                state.camera.projection.znear = state.camera.projection.znear.clamp(min_near,max_near );
+                state.camera.projection.zfar = state.camera.projection.zfar.clamp(min_far,max_far);
             });
         CollapsingHeader::new("Advanced").show_unindented(ui, |ui| {
             Grid::new("settings_advanced")
@@ -107,7 +118,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         )
                     });
                     ui.vertical(|ui| {
-                        if state.volume.volume.timesteps > 1 { 
+                        if state.volume.volume.timesteps > 1 {
                             egui::ComboBox::new("temporal_interpolation", "Time")
                                 .selected_text(match state.render_settings.temporal_filter {
                                     wgpu::FilterMode::Nearest => "Nearest",
@@ -146,8 +157,11 @@ pub(crate) fn ui(state: &mut WindowContext) {
                                     "Linear",
                                 )
                             });
-                        ui.end_row();
                     });
+
+                    ui.end_row();
+                    ui.label("Bounding Box");
+                    ui.checkbox(&mut state.show_box, "");
                 });
         });
     });
@@ -360,8 +374,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         ui.add(
                             egui::DragValue::new(&mut state.render_settings.iso_threshold)
                                 .range(
-                                    state.volume.volume.min_value
-                                        ..=state.volume.volume.max_value, // TODO use all volume for vmin vmax
+                                    state.volume.volume.min_value..=state.volume.volume.max_value, // TODO use all volume for vmin vmax
                                 )
                                 .speed(0.1),
                         );
@@ -429,65 +442,8 @@ pub(crate) fn ui(state: &mut WindowContext) {
         });
     }
 
-    let frame_rect = ctx.available_rect();
-    egui::Area::new(egui::Id::new("orientation"))
-        .fixed_pos(Pos2::new(frame_rect.left(), frame_rect.bottom()))
-        .anchor(Align2::LEFT_BOTTOM, Vec2::new(0., 0.))
-        .interactable(false)
-        .order(Order::Background)
-        .show(ctx, |ui| {
-            let (response, painter) = ui.allocate_painter(
-                vec2(100., 100.),
-                Sense {
-                    click: false,
-                    drag: false,
-                    focusable: false,
-                },
-            );
-
-            let to_screen = emath::RectTransform::from_to(
-                Rect::from_two_pos(Pos2::new(-1.2, -1.2), Pos2::new(1.2, 1.2)),
-                response.rect,
-            );
-            let x_color = Color32::RED;
-            let y_color = Color32::GREEN;
-            let z_color = Color32::BLUE;
-
-            let view_matrix = state.camera.view_matrix();
-            let x_axis = view_matrix.transform_vector(Vector3::unit_x());
-            // multiply with -1 because in egui origin is top left
-            let y_axis = -view_matrix.transform_vector(Vector3::unit_y());
-            let z_axis = view_matrix.transform_vector(Vector3::unit_z());
-            let origin = view_matrix.transform_vector(Vector3::zero());
-
-            let axes = [
-                (x_axis, x_color, "X"),
-                (y_axis, y_color, "Y"),
-                (z_axis, z_color, "Z"),
-            ];
-            let depth = vec![-x_axis.z, -y_axis.z, -z_axis.z];
-            let draw_order = argsort(&depth);
-
-
-            for i in draw_order.iter() {
-                let (axis, color, label) = axes[*i];
-                let pos = to_screen.transform_pos(pos2(axis.x, axis.y));
-                painter.add(PathShape::line(
-                    vec![to_screen.transform_pos(pos2(origin.x, origin.y)), pos],
-                    Stroke::new(3., color),
-                ));
-                painter.add(TextShape::new(
-                    pos,
-                    painter.layout_no_wrap(label.to_string(), FontId::default(), color),
-                    color,
-                ));
-                // bbox
-                let aabb = state.volume.volume.aabb;    
-                let t = state.camera.view_matrix()*state.camera.proj_matrix();
-                let min_screen = t.transform_point(aabb.min);
-                let max_screen = t.transform_point(aabb.max);
-            }
-        });
+    if state.show_box{
+        let frame_rect = ctx.available_rect();
         egui::Area::new(egui::Id::new("bbox"))
             .anchor(Align2::LEFT_BOTTOM, Vec2::new(0., 0.))
             .interactable(false)
@@ -501,50 +457,44 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         focusable: false,
                     },
                 );
-    
+
                 let to_screen = emath::RectTransform::from_to(
                     Rect::from_two_pos(Pos2::new(-1.0, -1.0), Pos2::new(1.0, 1.0)),
                     response.rect,
                 );
-                 // bbox
-                 let aabb = state.volume.volume.aabb;    
-                 let t = state.camera.proj_matrix()*state.camera.view_matrix();
-                 {
-                    let min_screen = t.transform_point(aabb.min);
-                    let max_screen = t.transform_point(Point3::new(aabb.min.x, aabb.min.y, aabb.max.z));
+                // bbox
+                let aabb = state.volume.volume.aabb;
+                let t = state.camera.proj_matrix() * state.camera.view_matrix();
+                aabb.corners();
+                let corners = aabb.corners().map(|p| {
+                    let p_screen = t.transform_point(p);
+                    to_screen.transform_pos(pos2(p_screen.x, p_screen.y))
+                });
+                let lines = [
+                    (0,1,egui::Color32::BLUE),
+                    (0,2,egui::Color32::GREEN),
+                    (0,4,egui::Color32::RED),
+                    (6,2,egui::Color32::YELLOW),
+                    (6,4,egui::Color32::YELLOW),
+                    (6,7,egui::Color32::YELLOW),
+                    (5,7,egui::Color32::YELLOW),
+                    (5,4,egui::Color32::YELLOW),
+                    (5,1,egui::Color32::YELLOW),
+                    (3,1,egui::Color32::YELLOW),
+                    (3,2,egui::Color32::YELLOW),
+                    (3,7,egui::Color32::YELLOW),
+                ];
+                for (a,b,color) in lines{
                     painter.add(PathShape::line(
-                        vec![to_screen.transform_pos(pos2(min_screen.x, min_screen.y)), to_screen.transform_pos(pos2(max_screen.x, max_screen.y))],
-                        Stroke::new(3., egui::Color32::BLUE),
-                    ));
-                }
-                {
-                    let min_screen = t.transform_point(aabb.min);
-                    let max_screen = t.transform_point(Point3::new(aabb.max.x, aabb.min.y, aabb.min.z));
-                    painter.add(PathShape::line(
-                        vec![to_screen.transform_pos(pos2(min_screen.x, min_screen.y)), to_screen.transform_pos(pos2(max_screen.x, max_screen.y))],
-                        Stroke::new(3., egui::Color32::RED),
-                    ));
-                }
-                {
-                    let min_screen = t.transform_point(aabb.min);
-                    let max_screen = t.transform_point(Point3::new(aabb.min.x, aabb.max.y, aabb.min.z));
-                    painter.add(PathShape::line(
-                        vec![to_screen.transform_pos(pos2(min_screen.x, min_screen.y)), to_screen.transform_pos(pos2(max_screen.x, max_screen.y))],
-                        Stroke::new(3., egui::Color32::GREEN),
+                        vec![corners[a],corners[b]],
+                        Stroke::new(3., color),
                     ));
                 }
             });
-
-
+        }
 }
 
-pub fn argsort<T: PartialOrd>(data: &[T]) -> Vec<usize> {
-    let mut indices: Vec<usize> = (0..data.len()).collect::<Vec<_>>();
-    indices.sort_by(|&a, &b| data[a].partial_cmp(&data[b]).unwrap());
-    indices
-}
-
-use cgmath::{InnerSpace, MetricSpace, Point3, Transform, Vector2, Vector3, Vector4, Zero};
+use cgmath::{Angle, InnerSpace, MetricSpace, Transform, Vector3, Vector4};
 use egui::{epaint::PathShape, *};
 
 pub fn tf_ui(ui: &mut Ui, points: &mut Vec<(f32, f32, f32)>) -> egui::Response {
@@ -737,8 +687,9 @@ pub fn color_edit_button_rgb(ui: &mut Ui, rgb: &mut Vector3<f32>) -> Response {
 }
 
 pub fn color_edit_button_rgba(ui: &mut Ui, rgb: &mut Vector4<f32>) -> Response {
-    let mut rgba = Rgba::from_rgba_premultiplied(rgb[0], rgb[1], rgb[2],rgb[3]);
-    let response = color_picker::color_edit_button_rgba(ui, &mut rgba, color_picker::Alpha::BlendOrAdditive);
+    let mut rgba = Rgba::from_rgba_premultiplied(rgb[0], rgb[1], rgb[2], rgb[3]);
+    let response =
+        color_picker::color_edit_button_rgba(ui, &mut rgba, color_picker::Alpha::BlendOrAdditive);
     rgb[0] = rgba[0];
     rgb[1] = rgba[1];
     rgb[2] = rgba[2];

@@ -187,7 +187,9 @@ impl SSAO {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: Some(NonZero::new(std::mem::size_of::<CameraUniform>() as u64).unwrap()),
+                        min_binding_size: Some(
+                            NonZero::new(std::mem::size_of::<CameraUniform>() as u64).unwrap(),
+                        ),
                     },
                     count: None,
                 },

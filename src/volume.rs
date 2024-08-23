@@ -173,14 +173,13 @@ impl Volume {
 
         let mut volume = if is_nifti {
             Self::load_nifti(reader)
-        }else 
-        if is_npz {
+        } else if is_npz {
             Self::load_npz(reader)
         } else {
             Self::load_npy(reader)
         }?;
         log::info!("loaded volume in {:?}", start.elapsed());
-        assert_eq!(volume.len(),1);
+        assert_eq!(volume.len(), 1);
         return Ok(volume.pop().unwrap());
     }
 
@@ -234,7 +233,13 @@ impl Volume {
             aabb,
             min_value,
             max_value,
-            data: data.as_standard_layout().as_slice().unwrap().iter().map(|&v| f16::from_f32(v)).collect(),
+            data: data
+                .as_standard_layout()
+                .as_slice()
+                .unwrap()
+                .iter()
+                .map(|&v| f16::from_f32(v))
+                .collect(),
         }]);
     }
 }
@@ -304,5 +309,20 @@ impl<F: Float + BaseNum> Aabb<F> {
     /// radius of a sphere that contains the aabb
     pub fn radius(&self) -> F {
         self.min.distance(self.max) / (F::one() + F::one())
+    }
+
+    /// returns box corners in order:
+    /// min, max_z, max_y, max_yz, max_x, max_xz, max_xy, max
+    pub fn corners(&self) -> [Point3<F>; 8] {
+        [
+            self.min,
+            Point3::new(self.min.x, self.min.y, self.max.z),
+            Point3::new(self.min.x, self.max.y, self.min.z),
+            Point3::new(self.min.x, self.max.y, self.max.z),
+            Point3::new(self.max.x, self.min.y, self.min.z),
+            Point3::new(self.max.x, self.min.y, self.max.z),
+            Point3::new(self.max.x, self.max.y, self.min.z),
+            self.max,
+        ]
     }
 }

@@ -39,16 +39,18 @@ impl VolumeRenderer {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: color_format,
-                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                }),
-                Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba16Float,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format: color_format,
+                        blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState {
@@ -100,7 +102,6 @@ impl VolumeRenderer {
             contents: bytemuck::bytes_of(&CameraUniform::from(camera)),
             usage: wgpu::BufferUsages::UNIFORM,
         });
-        
 
         let settings_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("settnigs buffer"),
@@ -268,7 +269,7 @@ impl CameraUniform {
     }
 
     pub(crate) fn set_proj_mat(&mut self, proj_matrix: Matrix4<f32>) {
-        self.proj_matrix =  proj_matrix;
+        self.proj_matrix = proj_matrix;
         self.proj_inv_matrix = proj_matrix.invert().unwrap();
     }
 
@@ -307,7 +308,7 @@ pub struct RenderSettings {
     pub iso_light_color: Vector3<f32>,
     pub iso_diffuse_color: Vector4<f32>,
 
-    pub ssao:bool
+    pub ssao: bool,
 }
 
 impl Default for RenderSettings {
@@ -330,7 +331,7 @@ impl Default for RenderSettings {
             iso_specular_color: Vector3::new(0.7, 0.7, 0.7),
             iso_light_color: Vector3::new(1., 1., 1.),
             iso_diffuse_color: Vector4::new(0.8, 0.8, 0.8, 1.0),
-            ssao:true,
+            ssao: true,
         }
     }
 }
@@ -408,7 +409,7 @@ impl Default for RenderSettingsUniform {
             time: 0.,
             time_steps: 1,
             step_size: 0.01,
-            temporal_filter: wgpu::FilterMode::Nearest as u32,
+            temporal_filter: wgpu::FilterMode::Linear as u32,
             distance_scale: 1.,
             vmin: 0.,
             vmax: 1.,

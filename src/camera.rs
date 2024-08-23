@@ -38,6 +38,26 @@ impl<P: Projection> Camera<P> {
     pub fn proj_matrix(&self) -> Matrix4<f32> {
         self.projection.projection_matrix()
     }
+
+    pub fn visible(&self,aabb: Aabb<f32>)->bool{
+        let planes = frustum_planes(self.view_matrix(), self.proj_matrix());
+        let center = aabb.center();
+        let radius = aabb.radius();
+        for p in planes{
+            let d = p.dot(center.to_homogeneous());
+            if d < -radius{
+                return false;
+            }
+        }
+        return true;
+    }
+    
+    pub fn view_direction(&self) -> Vector3<f32> {
+        let view_inv = self.view_matrix().invert().unwrap();
+        let dir = view_inv.transform_vector(Vector3::new(0.,0.,1.));
+        return dir.normalize();
+
+    }
 }
 
 impl Default for PerspectiveCamera {
@@ -108,7 +128,7 @@ pub fn world2view(r: impl Into<Matrix3<f32>>, t: Point3<f32>) -> Matrix4<f32> {
 }
 
 pub fn build_proj(znear: f32, zfar: f32, fov_x: Rad<f32>, fov_y: Rad<f32>) -> Matrix4<f32> {
-   cgmath::perspective(fov_y, fov_x/fov_y, znear, zfar)
+    cgmath::perspective(fov_y, fov_x / fov_y, znear, zfar)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -152,4 +172,23 @@ impl Projection for OrthographicProjection {
         p[3][3] = 1.0;
         return p;
     }
+}
+
+
+fn frustum_planes(view:Matrix4<f32>,proj:Matrix4<f32>)->[Vector4<f32>;6]{
+    let a = (proj*view).transpose();
+    [
+        hessian_plane(a[0]+a[3]),
+        hessian_plane(-a[0]+a[3]),
+        hessian_plane(a[1]+a[3]),
+        hessian_plane(-a[1]+a[3]),
+        hessian_plane(a[2]+a[3]),
+        hessian_plane(-a[2]+a[3]),
+    ]
+}
+
+fn hessian_plane(p:Vector4<f32>)->Vector4<f32>{
+    // normal length
+    let l = p.truncate().magnitude();
+    return p/l;
 }

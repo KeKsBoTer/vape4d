@@ -54,10 +54,16 @@ fn ssao_frag(vertex_in: VertexOut) -> @location(0) f32 {
     let normal = normal_depth.rgb;
     // depth in world space
     var depth = normal_depth.a;
+
+    let p = camera.proj;
+    let znear = -(p[3][2]+1.)/p[2][2];
+    let zfar = (1.-p[3][2])/p[2][2];
+
     if depth == 0.{
-        depth = 100.;
+        depth = zfar;
     }
-    return clamp(1.-(depth*0.4),0.,1.); // this is just a placeholder that renders the depth 
+    let depth_n = (depth-znear)/(zfar-znear);
+    return 1.-depth_n; // this is just a placeholder that renders the depth 
 
     // TODO get this to work
     // let rotationVec = normalize(vec3<f32>(rand(uv),rand(uv*2.),rand(uv*3.)));

@@ -256,6 +256,7 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
                 depth = distance(cam_pos,pos);
                 let a = 1.; // always fully opaque //diffuse_color.a;
                 color += transmittance * a * radiance;
+
                 transmittance *= 1. - a;
 
                 break;
