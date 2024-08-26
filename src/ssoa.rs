@@ -3,7 +3,7 @@ use std::num::NonZero;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    camera::{Camera, OrthographicCamera},
+    camera::OrthographicCamera,
     renderer::CameraUniform,
 };
 

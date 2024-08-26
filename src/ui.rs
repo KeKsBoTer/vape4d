@@ -1,7 +1,7 @@
 use std::{f32::consts::PI, ops::RangeInclusive, time::Duration};
 
 use bytemuck::Zeroable;
-use egui::{emath::Numeric, epaint::TextShape, vec2};
+use egui::{emath::Numeric, vec2};
 use egui_plot::{Plot, PlotImage, PlotPoint};
 
 use crate::{
@@ -103,13 +103,15 @@ pub(crate) fn ui(state: &mut WindowContext) {
             Grid::new("settings_advanced")
                 .num_columns(2)
                 .show(ui, |ui| {
-                    ui.label("Step Size").on_hover_text("Distance between sample steps for rendering.\nSmaller values give better quality but are slower.");
-                    ui.add(
-                        egui::DragValue::new(&mut state.render_settings.step_size)
-                            .speed(0.01)
-                            .range((1e-3)..=(0.1)),
-                    );
-                    ui.end_row();
+                    if state.render_settings.spatial_filter == wgpu::FilterMode::Linear{
+                        ui.label("Step Size").on_hover_text("Distance between sample steps for rendering.\nSmaller values give better quality but are slower.");
+                        ui.add(
+                            egui::DragValue::new(&mut state.render_settings.step_size)
+                                .speed(0.01)
+                                .range((1e-3)..=(0.1)),
+                        );
+                        ui.end_row();
+                    }
                     ui.with_layout(Layout::top_down(Align::Min), |ui| {
                         ui.add(
                             egui::Label::new("Interpolation")
@@ -387,6 +389,11 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         ui.label("SSAO");
                         ui.checkbox(&mut state.render_settings.ssao, "");
                         ui.end_row();
+                        if state.render_settings.spatial_filter == wgpu::FilterMode::Nearest {
+                            ui.label("Use Cube Surface Normal");
+                            ui.checkbox(&mut state.render_settings.use_cube_surface_grad, "");
+                            ui.end_row();
+                        }
                     });
 
                 ui.collapsing("Advanced", |ui| {
@@ -494,7 +501,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
         }
 }
 
-use cgmath::{Angle, InnerSpace, MetricSpace, Transform, Vector3, Vector4};
+use cgmath::{Angle, InnerSpace, Transform, Vector3, Vector4};
 use egui::{epaint::PathShape, *};
 
 pub fn tf_ui(ui: &mut Ui, points: &mut Vec<(f32, f32, f32)>) -> egui::Response {

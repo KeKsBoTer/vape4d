@@ -300,6 +300,7 @@ pub struct RenderSettings {
 
     pub render_volume: bool,
     pub render_iso: bool,
+    pub use_cube_surface_grad: bool,
     pub iso_shininess: f32,
     pub iso_threshold: f32,
 
@@ -323,8 +324,9 @@ impl Default for RenderSettings {
             vmin: None,
             vmax: None,
             gamma_correction: false,
-            render_volume: false,
-            render_iso: true,
+            render_volume: true,
+            render_iso: false,
+            use_cube_surface_grad: false,
             iso_shininess: 20.0,
             iso_threshold: 0.5,
             iso_ambient_color: Vector3::zero(),
@@ -346,8 +348,8 @@ pub struct RenderSettingsUniform {
 
     time: f32,
     time_steps: u32,
-    step_size: f32,
     temporal_filter: u32,
+    spatial_filter:u32,
 
     distance_scale: f32,
     vmin: f32,
@@ -361,8 +363,12 @@ pub struct RenderSettingsUniform {
 
     render_volume: u32,
     render_iso: u32,
+    use_cube_surface_grad: u32,
     iso_shininess: f32,
+
     iso_threshold: f32,
+    step_size: f32,
+    pad: [u32;2]
 }
 impl RenderSettingsUniform {
     pub fn from_settings(settings: &RenderSettings, volume: &Volume) -> Self {
@@ -383,18 +389,21 @@ impl RenderSettingsUniform {
                 .unwrap_or(RenderSettingsUniform::default().clipping_max),
             step_size: settings.step_size,
             temporal_filter: settings.temporal_filter as u32,
+            spatial_filter:settings.spatial_filter as u32,
             distance_scale: settings.distance_scale,
             vmin: settings.vmin.unwrap_or(volume.min_value),
             vmax: settings.vmax.unwrap_or(volume.max_value),
             gamma_correction: settings.gamma_correction as u32,
             render_volume: settings.render_volume as u32,
             render_iso: settings.render_iso as u32,
+            use_cube_surface_grad: settings.use_cube_surface_grad as u32,
             iso_shininess: settings.iso_shininess,
             iso_threshold: settings.iso_threshold,
             iso_ambient_color: settings.iso_ambient_color.extend(0.),
             iso_specular_color: settings.iso_specular_color.extend(0.),
             iso_light_color: settings.iso_light_color.extend(0.),
             iso_diffuse_color: settings.iso_diffuse_color,
+            pad:[0;2],
         }
     }
 }
@@ -410,12 +419,14 @@ impl Default for RenderSettingsUniform {
             time_steps: 1,
             step_size: 0.01,
             temporal_filter: wgpu::FilterMode::Linear as u32,
+            spatial_filter:wgpu::FilterMode::Nearest as u32,
             distance_scale: 1.,
             vmin: 0.,
             vmax: 1.,
             gamma_correction: 0,
             render_volume: 1,
             render_iso: 0,
+            use_cube_surface_grad: 0,
             iso_shininess: 20.0,
             iso_threshold: 0.5,
             iso_ambient_color: Vector4::zero(),
@@ -423,6 +434,8 @@ impl Default for RenderSettingsUniform {
             iso_specular_color: Vector4::new(1., 1., 1., 0.),
             iso_light_color: Vector4::new(1., 1., 1., 0.),
             iso_diffuse_color: Vector4::new(0.5, 0.5, 0.5, 0.),
+
+            pad:[0;2]
         }
     }
 }
