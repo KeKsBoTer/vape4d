@@ -306,6 +306,7 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
     var last_sample_pos = sample_pos;
     var last_sample = sample_volume(last_sample_pos);
     var normal = vec3<f32>(0.);
+    var last_normal = vec3<f32>(0.);
     var depth = 0.;
 
     let cam_pos = camera.view_inv[3].xyz;
@@ -340,17 +341,15 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
     var first = true;
     var sign = 1.;
     loop{
-
-        // sample_pos = next_pos(&pos, step_size, ray.dir);
-
-        let slice_test = any(sample_pos < settings.clipping.min) || any(sample_pos > settings.clipping.max) ;
-        if slice_test || distance(ray_in.orig,pos) > ray_len || iters > 10000 {
-            break;
-        }
         if settings.spatial_filter == FILTER_NEAREST {
             sample_pos = next_pos_dda(&pos, &step_size, start_point, ray.dir, &state);
         } else {
             sample_pos = next_pos(&pos, step_size, ray.dir);
+        }
+
+        let slice_test = any(sample_pos < settings.clipping.min) || any(sample_pos > settings.clipping.max) ;
+        if slice_test || distance(ray_in.orig,pos) > ray_len || iters > 10000 {
+            break;
         }
 
         let sample = sample_volume(sample_pos);
@@ -364,14 +363,12 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
                 let t = (iso_threshold - last_sample) / (sample - last_sample + 1e-4);
                 let intersection = mix(last_sample_pos, sample_pos.xyz, t);
 
-                var n: vec3<f32>;
                 if bool(settings.use_cube_surface_grad) {
-                    n = vec3<f32>(state.step_dir_curr);
+                    normal = last_normal;
                 } else {
                     let gradient = sample_volume_gradient(intersection);
-                    n = -sign * normalize(gradient);
+                    normal = -sign * normalize(gradient);
                 }
-                normal = n;
                 let light_dir = normalize(ray.dir + vec3<f32>(0.1));
                 let view_dir = ray.dir;
 
@@ -422,6 +419,7 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
         iters += 1u;
         last_sample = sample;
         last_sample_pos = sample_pos;
+        last_normal = vec3<f32>(state.step_dir_curr);
     }
     *normal_depth = vec4<f32>(normal,depth);
     return vec4<f32>(color, 1. - transmittance);
