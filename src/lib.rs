@@ -2,8 +2,8 @@ use camera::{Camera, OrthographicProjection};
 use cmap::LinearSegmentedColorMap;
 use controller::CameraController;
 use renderer::{RenderSettings, VolumeRenderer};
-use ssoa::{SSAOTextures, SSAO};
-use std::{path::PathBuf, sync::Arc, thread::sleep};
+use ssoa::SSAOTextures;
+use std::{path::PathBuf, sync::Arc};
 use volume::VolumeGPU;
 
 #[cfg(target_arch = "wasm32")]
@@ -11,7 +11,7 @@ use instant::{Duration, Instant};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
 
-use wgpu::{rwh::HasDisplayHandle, Backends};
+use wgpu::Backends;
 
 #[cfg(target_arch = "wasm32")]
 mod web;

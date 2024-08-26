@@ -209,7 +209,11 @@ impl Volume {
         if dim != 3 {
             anyhow::bail!("unsupported dimensionality: {}", dim);
         }
+        log::debug!("dim: {:?}",volume.dim());
+
+        // Array::from_shape_vec()
         let data = volume.into_ndarray::<f32>()?;
+
         let min_value = data.iter().fold(f32::MAX, |a, &b| a.min(b)) as f32;
         let mut max_value = data.iter().fold(f32::MIN, |a, &b| a.max(b)) as f32;
         if min_value == max_value {
@@ -233,11 +237,7 @@ impl Volume {
             aabb,
             min_value,
             max_value,
-            data: data
-                .as_standard_layout()
-                .as_slice()
-                .unwrap()
-                .iter()
+            data: data.as_standard_layout().t().iter()
                 .map(|&v| f16::from_f32(v))
                 .collect(),
         }]);
