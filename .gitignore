@@ -15,3 +15,4 @@ cmaps_custom/
 volumes/
 public/*.wasm
 public/*.js
+.idea/
