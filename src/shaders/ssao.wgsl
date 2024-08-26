@@ -42,28 +42,24 @@ fn vs_main(
     return VertexOut(vec4<f32>(xy * 2. - (1.), 0., 1.), vec2<f32>(xy.x, 1. - xy.y));
 }
 
-//fn rand(co:vec2<f32>) -> f32{
-//    return fract(sin(dot(co.xy ,vec2(12.9898,78.233))) * 43758.5453);
-//}
-
-/*
- * Copyright (c) 2014-2021, NVIDIA CORPORATION.  All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * SPDX-FileCopyrightText: Copyright (c) 2014-2021 NVIDIA CORPORATION
- * SPDX-License-Identifier: Apache-2.0
- */
+//
+// Copyright (c) 2014-2021, NVIDIA CORPORATION.  All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+// SPDX-FileCopyrightText: Copyright (c) 2014-2021 NVIDIA CORPORATION
+// SPDX-License-Identifier: Apache-2.0
+//
 
 //////////////////////////// AO //////////////////////////////////////
 const EPS = 0.05;
@@ -136,10 +132,9 @@ fn ssao_frag(vertex_in: VertexOut) -> @location(0) f32 {
     let zfar = (1.0 - p[3][2]) / p[2][2];
 
     if depth == 0.0 {
-        depth = zfar;
+        return 1.;
     }
     let depth_n = (depth - znear) / (zfar - znear);
-    //return 1.0 - depth_n; // this is just a placeholder that renders the depth
 
     // view space position
     let frag_pos_ndc = vec4<f32>(uv * 2.0 - 1.0, depth_n, 1.0);
@@ -177,16 +172,6 @@ fn ssao_frag(vertex_in: VertexOut) -> @location(0) f32 {
         let sample_screen_space_hom = camera.proj * vec4(sample_view_space, 1.0);
         let sample_screen_space = sample_screen_space_hom.xyz / sample_screen_space_hom.w * 0.5 + 0.5;
 
-        // Apply projection matrix to view space sample to get position in clip space.
-        /*var screen_space_position = vec4<f32>(sample_view_space, 1.0);
-        screen_space_position = camera.proj * screen_space_position;
-        screen_space_position = vec4<f32>(
-            screen_space_position.x / screen_space_position.w * 0.5 + 0.5,
-            screen_space_position.y / screen_space_position.y * 0.5 + 0.5,
-            0.0,
-            0.0
-        );*/
-
         // Get depth at sample position (of kernel sample).
         let sample_depth = textureSample(in_texture, texture_sampler, sample_screen_space.xy).a;
 
@@ -199,7 +184,7 @@ fn ssao_frag(vertex_in: VertexOut) -> @location(0) f32 {
         }
     }
 
-    return 1.0 - (occlusion / f32(KERNEL_SIZE));
+    return (occlusion / f32(KERNEL_SIZE));
 }
 
 // TODO which radius do we need? 
