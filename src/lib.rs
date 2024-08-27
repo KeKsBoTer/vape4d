@@ -195,12 +195,14 @@ impl WindowContext {
             clipping_aabb: None,
             time: 0.,
             step_size: 2. / 1000.,
-            spatial_filter: wgpu::FilterMode::Nearest,
+            spatial_filter: wgpu::FilterMode::Linear,
             temporal_filter: wgpu::FilterMode::Linear,
             distance_scale: render_config.distance_scale,
             vmin: render_config.vmin,
             vmax: render_config.vmax,
             gamma_correction: !surface_format.is_srgb(),
+            render_volume:false,
+            render_iso:true,
             ..Default::default()
         };
 
@@ -383,6 +385,7 @@ impl WindowContext {
                 &self.ssao_textures,
                 &self.camera,
                 &view_rgb,
+                &frame_data
             );
         }
 

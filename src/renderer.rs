@@ -173,7 +173,7 @@ impl VolumeRenderer {
         render_pass.draw(0..4, 0..1);
     }
 
-    fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    pub(crate) fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("volume renderer bind group layout"),
             entries: &[
@@ -232,7 +232,7 @@ impl VolumeRenderer {
 }
 
 pub struct PerFrameData<'a> {
-    bind_group: wgpu::BindGroup,
+    pub(crate) bind_group: wgpu::BindGroup,
     cmap_bind_group: &'a wgpu::BindGroup,
 }
 
@@ -310,6 +310,9 @@ pub struct RenderSettings {
     pub iso_diffuse_color: Vector4<f32>,
 
     pub ssao: bool,
+    pub ssao_radius: f32,
+    pub ssao_bias: f32,
+    pub ssao_kernel_size:u32,
 }
 
 impl Default for RenderSettings {
@@ -334,6 +337,9 @@ impl Default for RenderSettings {
             iso_light_color: Vector3::new(1., 1., 1.),
             iso_diffuse_color: Vector4::new(0.8, 0.8, 0.8, 1.0),
             ssao: true,
+            ssao_radius: 0.4,
+            ssao_bias: 0.02,
+            ssao_kernel_size:64,
         }
     }
 }
@@ -368,7 +374,11 @@ pub struct RenderSettingsUniform {
 
     iso_threshold: f32,
     step_size: f32,
-    pad: [u32;2]
+    ssao_radius: f32,
+    ssao_bias: f32,
+
+    ssao_kernel_size:u32,
+    _pad: [u32; 3],
 }
 impl RenderSettingsUniform {
     pub fn from_settings(settings: &RenderSettings, volume: &Volume) -> Self {
@@ -403,7 +413,10 @@ impl RenderSettingsUniform {
             iso_specular_color: settings.iso_specular_color.extend(0.),
             iso_light_color: settings.iso_light_color.extend(0.),
             iso_diffuse_color: settings.iso_diffuse_color,
-            pad:[0;2],
+            ssao_radius: settings.ssao_radius,
+            ssao_bias: settings.ssao_bias,
+            ssao_kernel_size:settings.ssao_kernel_size,
+            _pad: [0; 3],
         }
     }
 }
@@ -435,7 +448,10 @@ impl Default for RenderSettingsUniform {
             iso_light_color: Vector4::new(1., 1., 1., 0.),
             iso_diffuse_color: Vector4::new(0.5, 0.5, 0.5, 0.),
 
-            pad:[0;2]
+            ssao_radius: 0.4,
+            ssao_bias: 0.02,
+            ssao_kernel_size:64,
+            _pad: [0; 3],
         }
     }
 }

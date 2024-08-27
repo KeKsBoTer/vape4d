@@ -6,6 +6,7 @@ use crate::{
     camera::OrthographicCamera,
     renderer::CameraUniform,
 };
+use crate::renderer::{PerFrameData, VolumeRenderer};
 
 pub struct SSAO {
     ssao_pipeline: wgpu::RenderPipeline,
@@ -26,7 +27,7 @@ impl SSAO {
 
         let ssao_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("ssao Pipeline layout"),
-            bind_group_layouts: &[&bg_layout],
+            bind_group_layouts: &[&bg_layout,&VolumeRenderer::bind_group_layout(&device)],
             push_constant_ranges: &[],
         });
 
@@ -204,6 +205,7 @@ impl SSAO {
         textures: &SSAOTextures,
         camera: &OrthographicCamera,
         target_texture: &wgpu::TextureView,
+        frame_data: &PerFrameData,
     ) {
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("camera buffer"),
@@ -246,6 +248,7 @@ impl SSAO {
                 occlusion_query_set: None,
             });
             ssao_pass.set_bind_group(0, &ssao_bg, &[]);
+            ssao_pass.set_bind_group(1, &frame_data.bind_group, &[]);
             ssao_pass.set_pipeline(&self.ssao_pipeline);
 
             ssao_pass.draw(0..4, 0..1);
