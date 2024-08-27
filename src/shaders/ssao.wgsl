@@ -1,7 +1,3 @@
-//const SSAO_RADIUS: f32 = 0.05; // = 0.05;
-//const SSAO_BIAS: f32 = 0.005;
-const KERNEL_SIZE: u32 = 64;
-
 
 struct CameraUniforms {
     view: mat4x4<f32>,
@@ -39,6 +35,8 @@ struct Settings {
     step_size:f32,
     ssao_radius: f32,
     ssao_bias: f32,
+
+    ssao_kernel_size:u32
 }
 
 struct Aabb {
@@ -173,10 +171,7 @@ fn ssao_frag(vertex_in: VertexOut) -> @location(0) f32 {
     if depth == znear {
         return 1.;
     }
-    //let depth_n = (depth - znear) / (zfar - znear);
-
-    //let diff = zfar - znear;
-    //let z_ndc = (2.0 * znear * zfar / diff + depth * (znear + zfar) / diff) / depth;
+    
     // The depth buffer stores values in [0,1], but OpenGL uses [-1,1] for NDC.
     let z_ndc = (2.0 * depth - znear - zfar) / (zfar - znear);
     let depth_n = (z_ndc + 1.0) / 2.0;
@@ -186,17 +181,7 @@ fn ssao_frag(vertex_in: VertexOut) -> @location(0) f32 {
     let frag_pos_view_hom = camera.proj_inv * frag_pos_ndc;
     let frag_pos_view = frag_pos_view_hom.xyz / frag_pos_view_hom.w;
 
-    //if depth != 10000000.0 {
-        //return depth_n;
-        //return -frag_pos_view.z;
-        //return abs(depth - frag_pos_view.z);
-    //}
-
-    //let rotationVec = normalize(vec3<f32>(rand(uv),rand(uv*2.),rand(uv*3.)));
-
     // Create basis change matrix converting tangent space to view space.
-    //let tangent = normalize(rotationVec - normal * dot(rotationVec, normal));
-    //let bitangent = cross(normal, tangent);
     var tangent: vec3<f32>;
     var bitangent: vec3<f32>;
     ComputeDefaultBasis(normal, &tangent, &bitangent);
@@ -208,14 +193,13 @@ fn ssao_frag(vertex_in: VertexOut) -> @location(0) f32 {
 
     // Compute occlusion factor as occlusion average over all kernel samples.
     var occlusion = 0.0;
-    for (var i = 0u; i < KERNEL_SIZE; i += 1u) {
+    for (var i = 0u; i < settings.ssao_kernel_size; i += 1u) {
         // Convert sample position from tangent space to view space.
-        // TODO read this from a precomputed array / buffer
         var sample_vec = vec3<f32>(rnd(&seed) * 2.0 - 1.0, rnd(&seed) * 2.0 - 1.0, rnd(&seed));// samples[i].xyz;
         sample_vec = normalize(sample_vec);
         sample_vec *= rnd(&seed);
 
-        var scale = f32(i) / f32(KERNEL_SIZE);
+        var scale = f32(i) / f32(settings.ssao_kernel_size);
         scale = mix(0.1, 1.0, scale * scale);
         sample_vec *= scale;
 
@@ -239,7 +223,7 @@ fn ssao_frag(vertex_in: VertexOut) -> @location(0) f32 {
         }
     }
 
-    return 1.0 - (occlusion / f32(KERNEL_SIZE));
+    return 1.0 - (occlusion / f32(settings.ssao_kernel_size));
 }
 
 // TODO which radius do we need? 

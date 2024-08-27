@@ -312,6 +312,7 @@ pub struct RenderSettings {
     pub ssao: bool,
     pub ssao_radius: f32,
     pub ssao_bias: f32,
+    pub ssao_kernel_size:u32,
 }
 
 impl Default for RenderSettings {
@@ -338,6 +339,7 @@ impl Default for RenderSettings {
             ssao: true,
             ssao_radius: 0.4,
             ssao_bias: 0.02,
+            ssao_kernel_size:64,
         }
     }
 }
@@ -374,6 +376,9 @@ pub struct RenderSettingsUniform {
     step_size: f32,
     ssao_radius: f32,
     ssao_bias: f32,
+
+    ssao_kernel_size:u32,
+    _pad: [u32; 3],
 }
 impl RenderSettingsUniform {
     pub fn from_settings(settings: &RenderSettings, volume: &Volume) -> Self {
@@ -410,6 +415,8 @@ impl RenderSettingsUniform {
             iso_diffuse_color: settings.iso_diffuse_color,
             ssao_radius: settings.ssao_radius,
             ssao_bias: settings.ssao_bias,
+            ssao_kernel_size:settings.ssao_kernel_size,
+            _pad: [0; 3],
         }
     }
 }
@@ -443,6 +450,8 @@ impl Default for RenderSettingsUniform {
 
             ssao_radius: 0.4,
             ssao_bias: 0.02,
+            ssao_kernel_size:64,
+            _pad: [0; 3],
         }
     }
 }

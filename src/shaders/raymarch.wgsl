@@ -365,7 +365,7 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
                 let t = (iso_threshold - last_sample) / (sample - last_sample + 1e-4);
                 let intersection = mix(last_sample_pos, sample_pos.xyz, t);
 
-                if bool(settings.use_cube_surface_grad) {
+                if bool(settings.use_cube_surface_grad) && settings.spatial_filter == FILTER_NEAREST {
                     normal = last_normal;
                 } else {
                     let gradient = sample_volume_gradient(intersection);

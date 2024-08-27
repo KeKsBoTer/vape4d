@@ -392,7 +392,8 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     });
 
                 ui.collapsing("Advanced", |ui| {
-                    egui::Grid::new("iso_surface_settings_advanced")
+                    egui::collapsing_header::CollapsingHeader::new("Phong Shading").open(Some(true)).show(ui, |ui|{
+                    egui::Grid::new("iso_surface_settings_phong")
                         .num_columns(2)
                         .striped(true)
                         .show(ui, |ui| {
@@ -417,21 +418,46 @@ pub(crate) fn ui(state: &mut WindowContext) {
                             ui.label("Light Color");
                             color_edit_button_rgb(ui, &mut state.render_settings.iso_light_color);
                             ui.end_row();
-
+                        });
+                    });
+                    egui::collapsing_header::CollapsingHeader::new("SSAO").open(Some(true)).show(ui, |ui|{
+                        egui::Grid::new("iso_surface_settings_ssao")
+                        .num_columns(2)
+                        .striped(true)
+                        .show(ui, |ui| {
                             if state.render_settings.ssao {
-                                ui.label("SSAO Radius");
-                                ui.add(egui::Slider::new(&mut state.render_settings.ssao_radius, 0.01..=2.0));
+                                ui.label("Radius");
+                                ui.add(egui::Slider::new(
+                                    &mut state.render_settings.ssao_radius,
+                                    0.01..=2.0,
+                                ));
                                 ui.end_row();
-                                ui.label("SSAO Bias");
-                                ui.add(egui::Slider::new(&mut state.render_settings.ssao_bias, 0.001..=0.2).logarithmic(true));
+                                ui.label("Bias");
+                                ui.add(
+                                    egui::Slider::new(
+                                        &mut state.render_settings.ssao_bias,
+                                        0.001..=0.2,
+                                    )
+                                    .logarithmic(true),
+                                );
+                                ui.end_row();
+                                ui.label("Kernel Size");
+                                ui.add(
+                                    egui::Slider::new(
+                                        &mut state.render_settings.ssao_kernel_size,
+                                        1..=256,
+                                    )
+                                    .logarithmic(true),
+                                );
                                 ui.end_row();
                             }
                             if state.render_settings.spatial_filter == wgpu::FilterMode::Nearest {
-                                ui.label("Use Cube Surface Normal");
+                                ui.label("Cube Surface Normal");
                                 ui.checkbox(&mut state.render_settings.use_cube_surface_grad, "");
                                 ui.end_row();
                             }
                         });
+                    });
                 });
             });
     }
@@ -458,7 +484,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
         });
     }
 
-    if state.show_box{
+    if state.show_box {
         let frame_rect = ctx.available_rect();
         egui::Area::new(egui::Id::new("bbox"))
             .anchor(Align2::LEFT_BOTTOM, Vec2::new(0., 0.))
@@ -487,27 +513,27 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     to_screen.transform_pos(pos2(p_screen.x, p_screen.y))
                 });
                 let lines = [
-                    (0,1,egui::Color32::BLUE),
-                    (0,2,egui::Color32::GREEN),
-                    (0,4,egui::Color32::RED),
-                    (6,2,egui::Color32::YELLOW),
-                    (6,4,egui::Color32::YELLOW),
-                    (6,7,egui::Color32::YELLOW),
-                    (5,7,egui::Color32::YELLOW),
-                    (5,4,egui::Color32::YELLOW),
-                    (5,1,egui::Color32::YELLOW),
-                    (3,1,egui::Color32::YELLOW),
-                    (3,2,egui::Color32::YELLOW),
-                    (3,7,egui::Color32::YELLOW),
+                    (0, 1, egui::Color32::BLUE),
+                    (0, 2, egui::Color32::GREEN),
+                    (0, 4, egui::Color32::RED),
+                    (6, 2, egui::Color32::YELLOW),
+                    (6, 4, egui::Color32::YELLOW),
+                    (6, 7, egui::Color32::YELLOW),
+                    (5, 7, egui::Color32::YELLOW),
+                    (5, 4, egui::Color32::YELLOW),
+                    (5, 1, egui::Color32::YELLOW),
+                    (3, 1, egui::Color32::YELLOW),
+                    (3, 2, egui::Color32::YELLOW),
+                    (3, 7, egui::Color32::YELLOW),
                 ];
-                for (a,b,color) in lines{
+                for (a, b, color) in lines {
                     painter.add(PathShape::line(
-                        vec![corners[a],corners[b]],
+                        vec![corners[a], corners[b]],
                         Stroke::new(3., color),
                     ));
                 }
             });
-        }
+    }
 }
 
 use cgmath::{Angle, InnerSpace, Transform, Vector3, Vector4};
