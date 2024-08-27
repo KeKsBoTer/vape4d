@@ -39,7 +39,9 @@ struct Settings {
     iso_shininess: f32,
 
     iso_threshold: f32,
-    step_size:f32
+    step_size:f32,
+    ssao_radius: f32,
+    ssao_bias: f32,
 }
 
 
@@ -307,7 +309,7 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
     var last_sample = sample_volume(last_sample_pos);
     var normal = vec3<f32>(0.);
     var last_normal = vec3<f32>(0.);
-    var depth = 0.;
+    var depth = 1e6;
 
     let cam_pos = camera.view_inv[3].xyz;
 
@@ -387,7 +389,7 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
                     radiance += brdf * irradiance * light_color;
                 }
 
-                depth = distance(cam_pos,pos);
+                depth = distance(start_cam_pos, pos);
                 let a = 1.; // always fully opaque //diffuse_color.a;
                 color += transmittance * a * radiance;
 
@@ -421,7 +423,13 @@ fn trace_ray(ray_in: Ray, normal_depth: ptr<function,vec4<f32>>) -> vec4<f32> {
         last_sample_pos = sample_pos;
         last_normal = vec3<f32>(state.step_dir_curr);
     }
-    *normal_depth = vec4<f32>(normal,depth);
+    if length(normal) < 1e-4 {
+        normal = vec3<f32>(0.0, 0.0, -1.0);
+        depth = 0.0;
+    } else {
+        normal = (camera.view * vec4<f32>(normal, 0.0)).xyz;
+    }
+    *normal_depth = vec4<f32>(normal, depth);
     return vec4<f32>(color, 1. - transmittance);
 }
 

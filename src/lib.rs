@@ -383,6 +383,7 @@ impl WindowContext {
                 &self.ssao_textures,
                 &self.camera,
                 &view_rgb,
+                &frame_data
             );
         }
 

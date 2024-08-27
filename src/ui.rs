@@ -389,11 +389,6 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         ui.label("SSAO");
                         ui.checkbox(&mut state.render_settings.ssao, "");
                         ui.end_row();
-                        if state.render_settings.spatial_filter == wgpu::FilterMode::Nearest {
-                            ui.label("Use Cube Surface Normal");
-                            ui.checkbox(&mut state.render_settings.use_cube_surface_grad, "");
-                            ui.end_row();
-                        }
                     });
 
                 ui.collapsing("Advanced", |ui| {
@@ -422,6 +417,20 @@ pub(crate) fn ui(state: &mut WindowContext) {
                             ui.label("Light Color");
                             color_edit_button_rgb(ui, &mut state.render_settings.iso_light_color);
                             ui.end_row();
+
+                            if state.render_settings.ssao {
+                                ui.label("SSAO Radius");
+                                ui.add(egui::Slider::new(&mut state.render_settings.ssao_radius, 0.01..=2.0));
+                                ui.end_row();
+                                ui.label("SSAO Bias");
+                                ui.add(egui::Slider::new(&mut state.render_settings.ssao_bias, 0.001..=0.2).logarithmic(true));
+                                ui.end_row();
+                            }
+                            if state.render_settings.spatial_filter == wgpu::FilterMode::Nearest {
+                                ui.label("Use Cube Surface Normal");
+                                ui.checkbox(&mut state.render_settings.use_cube_surface_grad, "");
+                                ui.end_row();
+                            }
                         });
                 });
             });

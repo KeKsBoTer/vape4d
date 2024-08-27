@@ -1,5 +1,5 @@
-const SSAO_RADIUS: f32 = 0.05; // = 0.05;
-const SSAO_BIAS: f32 = 0.005;
+//const SSAO_RADIUS: f32 = 0.05; // = 0.05;
+//const SSAO_BIAS: f32 = 0.005;
 const KERNEL_SIZE: u32 = 64;
 
 
@@ -9,6 +9,42 @@ struct CameraUniforms {
     proj: mat4x4<f32>,
     proj_inv: mat4x4<f32>,
 };
+
+
+struct Settings {
+    volume_aabb: Aabb,
+    clipping: Aabb,
+
+    time: f32,
+    time_steps: u32,
+    temporal_filter: u32,
+    spatial_filter: u32,
+
+    distance_scale: f32,
+    vmin: f32,
+    vmax: f32,
+    gamma_correction: u32,
+
+    @align(16) @size(16) iso_ambient_color: vec3<f32>,
+    @align(16) @size(16) iso_specular_color: vec3<f32>,
+    @align(16) @size(16) iso_light_color: vec3<f32>,
+    iso_diffuse_color: vec4<f32>,
+
+    render_mode_volume: u32, // use volume rendering
+    render_mode_iso: u32, // use iso rendering
+    use_cube_surface_grad: u32, // whether to use cube surface gradients for render_mode_iso_nearest
+    iso_shininess: f32,
+
+    iso_threshold: f32,
+    step_size:f32,
+    ssao_radius: f32,
+    ssao_bias: f32,
+}
+
+struct Aabb {
+    @align(16) min: vec3<f32>,
+    @align(16) max: vec3<f32>,
+}
 
 
 // in_texture is the following:
@@ -21,6 +57,9 @@ var texture_sampler: sampler;
 
 @group(0) @binding(2)
 var<uniform> camera: CameraUniforms;
+
+@group(1) @binding(4)
+var<uniform> settings: Settings;
 
 
 
@@ -121,25 +160,37 @@ fn ssao_frag(vertex_in: VertexOut) -> @location(0) f32 {
     let texture_size = textureDimensions(in_texture);
     let pixel_coords = vec2<u32>(uv * vec2<f32>(texture_size));
 
-    let normal_depth = textureSample(in_texture, texture_sampler, uv);
-    // normalized normals
-    let normal = normal_depth.rgb;
-    // depth in world space
-    var depth = normal_depth.a;
-
     let p = camera.proj;
     let znear = -(p[3][2] + 1.0) / p[2][2];
     let zfar = (1.0 - p[3][2]) / p[2][2];
 
-    if depth == 0.0 {
+    let normal_depth = textureSample(in_texture, texture_sampler, uv);
+    // normalized normals
+    let normal = normal_depth.rgb;
+    // depth in world space
+    var depth = normal_depth.a + znear;
+
+    if depth == znear {
         return 1.;
     }
-    let depth_n = (depth - znear) / (zfar - znear);
+    //let depth_n = (depth - znear) / (zfar - znear);
+
+    //let diff = zfar - znear;
+    //let z_ndc = (2.0 * znear * zfar / diff + depth * (znear + zfar) / diff) / depth;
+    // The depth buffer stores values in [0,1], but OpenGL uses [-1,1] for NDC.
+    let z_ndc = (2.0 * depth - znear - zfar) / (zfar - znear);
+    let depth_n = (z_ndc + 1.0) / 2.0;
 
     // view space position
-    let frag_pos_ndc = vec4<f32>(uv * 2.0 - 1.0, depth_n, 1.0);
+    let frag_pos_ndc = vec4<f32>(uv * 2.0 - 1.0, z_ndc, 1.0);
     let frag_pos_view_hom = camera.proj_inv * frag_pos_ndc;
     let frag_pos_view = frag_pos_view_hom.xyz / frag_pos_view_hom.w;
+
+    //if depth != 10000000.0 {
+        //return depth_n;
+        //return -frag_pos_view.z;
+        //return abs(depth - frag_pos_view.z);
+    //}
 
     //let rotationVec = normalize(vec3<f32>(rand(uv),rand(uv*2.),rand(uv*3.)));
 
@@ -168,23 +219,27 @@ fn ssao_frag(vertex_in: VertexOut) -> @location(0) f32 {
         scale = mix(0.1, 1.0, scale * scale);
         sample_vec *= scale;
 
-        let sample_view_space = frag_pos_view + frame_matrix * sample_vec * vec3<f32>(SSAO_RADIUS);
+        let sample_view_space = frag_pos_view + frame_matrix * sample_vec * vec3<f32>(settings.ssao_radius);
         let sample_screen_space_hom = camera.proj * vec4(sample_view_space, 1.0);
         let sample_screen_space = sample_screen_space_hom.xyz / sample_screen_space_hom.w * 0.5 + 0.5;
 
         // Get depth at sample position (of kernel sample).
-        let sample_depth = textureSample(in_texture, texture_sampler, sample_screen_space.xy).a;
+        var sample_depth = textureSample(in_texture, texture_sampler, sample_screen_space.xy).a + znear;
+        if sample_depth == znear {
+            occlusion += 1.0;
+            continue;
+        }
 
         // Range check: Make sure only depth differences in the radius contribute to occlusion.
-        let range_check = smoothstep(0.0, 1.0, SSAO_RADIUS / abs(depth - sample_depth));
+        let range_check = smoothstep(0.0, 1.0, settings.ssao_radius / abs(depth - sample_depth));
 
         // Check if the sample contributes to occlusion.
-        if sample_depth >= -sample_view_space.z + SSAO_BIAS {
+        if sample_view_space.z >= sample_depth + settings.ssao_bias {
             occlusion += range_check;
         }
     }
 
-    return (occlusion / f32(KERNEL_SIZE));
+    return 1.0 - (occlusion / f32(KERNEL_SIZE));
 }
 
 // TODO which radius do we need? 
