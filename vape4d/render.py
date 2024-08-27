@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional, Union, List, Tuple
 from matplotlib import pyplot as plt
 from matplotlib.colors import Colormap
 import numpy as np
@@ -8,10 +8,10 @@ from . import vape4d
 def render(
     volume: np.ndarray,
     cmap: Optional[Colormap] = None,
-    time: Optional[Union[float, list[float]]] = 0.0,
+    time: Optional[Union[float, List[float]]] = 0.0,
     width: int = 1024,
     height: int = 1024,
-    background: tuple[float, float, float, float] = (0, 0, 0, 1),
+    background: Tuple[float, float, float, float] = (0, 0, 0, 1),
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
     distance_scale: float = 1.0,
