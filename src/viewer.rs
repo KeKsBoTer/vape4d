@@ -46,7 +46,7 @@ where
         cmap.into_linear_segmented(cmap::COLORMAP_RESOLUTION),
         RenderConfig {
             no_vsync: opt.no_vsync,
-            background_color: wgpu::Color::BLACK,
+            background_color: wgpu::Color::WHITE,
             show_colormap_editor: true,
             show_volume_info: true,
             vmin: None,

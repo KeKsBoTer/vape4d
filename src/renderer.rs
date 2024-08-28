@@ -335,7 +335,7 @@ impl Default for RenderSettings {
             iso_ambient_color: Vector3::zero(),
             iso_specular_color: Vector3::new(0.7, 0.7, 0.7),
             iso_light_color: Vector3::new(1., 1., 1.),
-            iso_diffuse_color: Vector4::new(0.8, 0.8, 0.8, 1.0),
+            iso_diffuse_color: Vector4::new(1.0, 0.871, 0.671, 1.0),
             ssao: true,
             ssao_radius: 0.4,
             ssao_bias: 0.02,
@@ -446,7 +446,7 @@ impl Default for RenderSettingsUniform {
 
             iso_specular_color: Vector4::new(1., 1., 1., 0.),
             iso_light_color: Vector4::new(1., 1., 1., 0.),
-            iso_diffuse_color: Vector4::new(0.5, 0.5, 0.5, 0.),
+            iso_diffuse_color: Vector4::new(1.0, 0.871, 0.671, 1.0),
 
             ssao_radius: 0.4,
             ssao_bias: 0.02,
