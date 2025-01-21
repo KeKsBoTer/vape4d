@@ -1,8 +1,7 @@
 use clap::Parser;
-use std::{fmt::Debug, path::PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
-use std::{fs::File, io::BufReader,ffi::OsString};
-
+use std::{ffi::OsString, fs::File, io::BufReader};
+use std::{fmt::Debug, path::PathBuf};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{cmap, open_window, volume::Volume, RenderConfig};
@@ -19,10 +18,6 @@ struct Opt {
     #[arg(long, default_value_t = false)]
     channel_first: bool,
 
-    #[cfg(not(feature = "colormaps"))]
-    colormap: PathBuf,
-
-    #[cfg(feature = "colormaps")]
     colormap: Option<PathBuf>,
 }
 
@@ -31,7 +26,6 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
-
     env_logger::init();
     let opt = Opt::try_parse_from(args)?;
 
@@ -40,19 +34,12 @@ where
     let volumes = Volume::load_numpy(BufReader::new(data_file), !opt.channel_first)
         .expect("Failed to load volume");
 
-    #[cfg(feature = "colormaps")]
-    let cmap = opt.colormap.map_or(
-        Ok(cmap::COLORMAPS["seaborn"]["icefire"].clone()),
-        |path| {
+    let cmap = opt
+        .colormap
+        .map_or(Ok(cmap::COLORMAPS["seaborn"]["icefire"].clone()), |path| {
             let reader = File::open(path)?;
             cmap::GenericColorMap::read(reader)
-        },
-    )?;
-    #[cfg(not(feature = "colormaps"))]
-    let cmap = {
-        let reader = File::open(&opt.colormap)?;
-        cmap::GenericColorMap::read(reader)?
-    };
+        })?;
 
     open_window(
         volumes,
@@ -64,7 +51,6 @@ where
             show_volume_info: true,
             vmin: None,
             vmax: None,
-            #[cfg(feature = "colormaps")]
             show_cmap_select: true,
             duration: None,
             distance_scale: 1.0,

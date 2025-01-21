@@ -3,32 +3,27 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
 };
 
-#[cfg(feature = "colormaps")]
 use std::{collections::HashMap, io::Cursor};
 
 use anyhow::Ok;
 use cgmath::Vector4;
-#[cfg(feature = "colormaps")]
+
 use include_dir::Dir;
 use npyz::WriterBuilder;
 #[cfg(feature = "python")]
 use numpy::ndarray::{ArrayViewD, Axis};
 use wgpu::{util::DeviceExt, Extent3d};
 
-#[cfg(feature = "colormaps")]
 use once_cell::sync::Lazy;
 
-#[cfg(feature = "colormaps")]
 use include_dir::include_dir;
 
-#[cfg(feature = "colormaps")]
 static COLORMAPS_MATPLOTLIB: include_dir::Dir = include_dir!("colormaps/matplotlib");
-#[cfg(feature = "colormaps")]
+
 static COLORMAPS_SEABORN: include_dir::Dir = include_dir!("colormaps/seaborn");
-#[cfg(feature = "colormaps")]
+
 static COLORMAPS_CMASHER: include_dir::Dir = include_dir!("colormaps/cmasher");
 
-#[cfg(feature = "colormaps")]
 fn load_cmaps(dir: &Dir) -> HashMap<String, GenericColorMap> {
     let cmaps: HashMap<String, GenericColorMap> = dir
         .files()
@@ -44,7 +39,7 @@ fn load_cmaps(dir: &Dir) -> HashMap<String, GenericColorMap> {
 }
 
 // list of predefined colormaps
-#[cfg(feature = "colormaps")]
+
 pub static COLORMAPS: Lazy<HashMap<String, HashMap<String, GenericColorMap>>> = Lazy::new(|| {
     let mut cmaps = HashMap::new();
     cmaps.insert("matplotlib".to_string(), load_cmaps(&COLORMAPS_MATPLOTLIB));

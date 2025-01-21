@@ -15,6 +15,7 @@ use crate::{
 #[pymodule]
 fn vape4d<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
     #[pyfn(m)]
+    #[pyo3(signature = (volume, cmap, width, height, time, background, distance_scale, vmin=None, vmax=None, spatial_interpolation=None, temporal_interpolation=None))]
     fn render_video<'py>(
         py: Python<'py>,
         volume: PyReadonlyArrayDyn<'py, f16>,
@@ -60,7 +61,7 @@ fn vape4d<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
             img.iter().flat_map(|img| img.to_vec()).collect(),
         )
         .unwrap();
-        return arr.into_pyarray_bound(py);
+        return arr.into_pyarray(py);
     }
 
     #[pyfn(m)]

@@ -1,7 +1,6 @@
 cargo build \
     --no-default-features \
     --target wasm32-unknown-unknown \
-    --features colormaps \
     --lib \
     --profile web-release\
 && wasm-bindgen \

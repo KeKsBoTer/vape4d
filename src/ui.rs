@@ -8,7 +8,6 @@ use crate::{
     WindowContext,
 };
 
-#[cfg(feature = "colormaps")]
 use crate::cmap::COLORMAPS;
 
 pub(crate) fn ui(state: &mut WindowContext) {
@@ -41,7 +40,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                             }
                         })
                         .suffix("s")
-                        .range((0.)..=1000.),
+                        .range((0.1)..=1000.),
                     );
                     ui.end_row();
                 }
@@ -183,7 +182,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         Some(vmax_max),
                     );
                 });
-                #[cfg(feature = "colormaps")]
+                
                 if state.cmap_select_visible {
                     ui.horizontal(|ui| {
                         let cmaps = &COLORMAPS;

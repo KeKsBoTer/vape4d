@@ -153,11 +153,7 @@ impl VolumeRenderer {
         }
     }
 
-    pub fn render(
-        &self,
-        render_pass: &mut wgpu::RenderPass<'static>,
-        frame_data: &PerFrameData,
-    ) {
+    pub fn render(&self, render_pass: &mut wgpu::RenderPass<'static>, frame_data: &PerFrameData) {
         render_pass.set_bind_group(0, &frame_data.bind_group, &[]);
         render_pass.set_bind_group(1, frame_data.cmap_bind_group, &[]);
         render_pass.set_pipeline(&self.pipeline);

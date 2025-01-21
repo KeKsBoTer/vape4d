@@ -36,14 +36,17 @@ pub mod camera;
 pub mod cmap;
 mod controller;
 pub mod offline;
+#[cfg(feature = "python")]
+pub mod py;
 pub mod renderer;
 mod ui;
 mod ui_renderer;
+#[cfg(not(target_arch = "wasm32"))]
 mod viewer;
+#[cfg(not(target_arch = "wasm32"))]
+pub use viewer::viewer;
+
 pub mod volume;
-#[cfg(feature = "python")]
-pub mod py;
-// pub mod image;
 
 #[derive(Debug, Clone)]
 pub struct RenderConfig {
@@ -54,7 +57,7 @@ pub struct RenderConfig {
     pub vmin: Option<f32>,
     pub vmax: Option<f32>,
     pub distance_scale: f32,
-    #[cfg(feature = "colormaps")]
+
     pub show_cmap_select: bool,
     pub duration: Option<Duration>,
 }
@@ -73,6 +76,7 @@ impl WGPUContext {
 
         let required_features = wgpu::Features::default();
 
+        log::debug!("adapter: {:?}", adapter.get_info());
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -122,7 +126,7 @@ pub struct WindowContext {
 
     colormap_editor_visible: bool,
     volume_info_visible: bool,
-    #[cfg(feature = "colormaps")]
+
     cmap_select_visible: bool,
 }
 
@@ -141,7 +145,7 @@ impl WindowContext {
         let window = Arc::new(window);
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: Backends::all().symmetric_difference(Backends::BROWSER_WEBGPU),
+            backends: Backends::PRIMARY.symmetric_difference(Backends::BROWSER_WEBGPU),
             ..Default::default()
         });
 
@@ -244,7 +248,7 @@ impl WindowContext {
             selected_channel: None,
             colormap_editor_visible: render_config.show_colormap_editor,
             volume_info_visible: render_config.show_volume_info,
-            #[cfg(feature = "colormaps")]
+
             cmap_select_visible: render_config.show_cmap_select,
         })
     }
@@ -431,19 +435,18 @@ impl App {
         volume: Vec<Volume>,
         cmap: LinearSegmentedColorMap,
         config: RenderConfig,
-        #[cfg(target_arch = "wasm32")]
-        canvas_id: String
+        #[cfg(target_arch = "wasm32")] canvas_id: String,
     ) -> Self {
         Self {
             state: None,
             volume,
             config,
-            last_touch_position:Vector2::zero(),
+            last_touch_position: Vector2::zero(),
             last_draw: Instant::now(),
             event_loop_proxy: Some(event_loop_proxy),
             cmap,
             #[cfg(target_arch = "wasm32")]
-            canvas_id
+            canvas_id,
         }
     }
 }
@@ -479,8 +482,12 @@ impl ApplicationHandler<WindowContext> for App {
 
             #[cfg(target_arch = "wasm32")]
             {
-                let window_context =
-                    WindowContext::new(window, self.volume.clone(), self.cmap.clone(),self.config.clone());
+                let window_context = WindowContext::new(
+                    window,
+                    self.volume.clone(),
+                    self.cmap.clone(),
+                    self.config.clone(),
+                );
                 wasm_bindgen_futures::spawn_local(async move {
                     let gfx = window_context.await.unwrap();
                     assert!(event_loop_proxy.send_event(gfx).is_ok());
@@ -489,8 +496,12 @@ impl ApplicationHandler<WindowContext> for App {
 
             #[cfg(not(target_arch = "wasm32"))]
             {
-                let window_context =
-                    WindowContext::new(window, self.volume.clone(), self.cmap.clone(),self.config.clone());
+                let window_context = WindowContext::new(
+                    window,
+                    self.volume.clone(),
+                    self.cmap.clone(),
+                    self.config.clone(),
+                );
                 let context = pollster::block_on(window_context).unwrap();
                 assert!(event_loop_proxy.send_event(context).is_ok());
             }
@@ -660,10 +671,16 @@ pub async fn open_window(
     volumes: Vec<Volume>,
     cmap: LinearSegmentedColorMap,
     config: RenderConfig,
-    #[cfg(target_arch = "wasm32")]
-    canvas_id: String,
+    #[cfg(target_arch = "wasm32")] canvas_id: String,
 ) {
     let event_loop: EventLoop<WindowContext> = EventLoop::with_user_event().build().unwrap();
-    let mut app = App::new(event_loop.create_proxy(), volumes,cmap, config, #[cfg(target_arch = "wasm32")]canvas_id);
+    let mut app = App::new(
+        event_loop.create_proxy(),
+        volumes,
+        cmap,
+        config,
+        #[cfg(target_arch = "wasm32")]
+        canvas_id,
+    );
     event_loop.run_app(&mut app).unwrap();
 }
