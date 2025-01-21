@@ -1,4 +1,4 @@
-use cgmath::Vector2;
+use cgmath::{Vector2, Vector3};
 use image::{ImageBuffer, Rgba};
 
 use crate::{
@@ -40,7 +40,8 @@ async fn render_view<P: Projection>(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("render encoder"),
     });
-    let frame_data = renderer.prepare(device, volume, &camera, &render_settings, cmap);
+    let channel = 0;
+    let frame_data = renderer.prepare(device, volume, &camera, &render_settings, cmap, channel);
     {
         let mut render_pass = encoder
             .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -76,6 +77,7 @@ pub async fn render_volume(
     distance_scale: f32,
     spatial_interpolation: wgpu::FilterMode,
     temporal_interpolation: wgpu::FilterMode,
+    axis_scale: Option<Vector3<f32>>,   
 ) -> anyhow::Result<Vec<ImageBuffer<Rgba<u8>, Vec<u8>>>> {
     env_logger::init();
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -120,6 +122,7 @@ pub async fn render_volume(
                 distance_scale,
                 spatial_filter: spatial_interpolation,
                 temporal_filter: temporal_interpolation,
+                axis_scale: axis_scale.unwrap_or(Vector3::new(1., 1., 1.)),
                 ..Default::default()
             },
             bg,

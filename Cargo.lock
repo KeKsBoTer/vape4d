@@ -2256,6 +2256,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "rawpointer",
+ "rayon",
 ]
 
 [[package]]
@@ -4118,6 +4119,7 @@ dependencies = [
  "include_dir",
  "instant",
  "log",
+ "ndarray",
  "npyz",
  "num-traits",
  "numpy",

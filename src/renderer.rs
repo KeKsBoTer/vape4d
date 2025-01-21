@@ -4,7 +4,7 @@ use crate::{
     volume::{Aabb, Volume, VolumeGPU},
 };
 
-use cgmath::{EuclideanSpace, Matrix4, SquareMatrix, Vector4, Zero};
+use cgmath::{ElementWise, EuclideanSpace, Matrix4, SquareMatrix, Vector3, Vector4, Zero};
 use wgpu::util::DeviceExt;
 
 pub struct VolumeRenderer {
@@ -89,6 +89,7 @@ impl VolumeRenderer {
         camera: &Camera<P>,
         render_settings: &RenderSettings,
         cmap: &'a ColorMapGPU,
+        channel:usize
     ) -> PerFrameData<'a> {
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("camera buffer"),
@@ -105,7 +106,7 @@ impl VolumeRenderer {
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
-        let step = ((volume.volume.timesteps - 1) as f32 * render_settings.time) as usize;
+        let step = ((volume.volume.timesteps() - 1) as f32 * render_settings.time) as usize;
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("volume renderer bind group"),
             layout: &Self::bind_group_layout(device),
@@ -113,13 +114,13 @@ impl VolumeRenderer {
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(
-                        &volume.textures[step].create_view(&wgpu::TextureViewDescriptor::default()),
+                        &volume.get_texture(channel, step).create_view(&wgpu::TextureViewDescriptor::default()),
                     ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::TextureView(
-                        &volume.textures[(step + 1) % volume.volume.timesteps as usize]
+                        &volume.get_texture(channel,(step + 1) % volume.volume.timesteps() as usize)
                             .create_view(&wgpu::TextureViewDescriptor::default()),
                     ),
                 },
@@ -286,6 +287,7 @@ pub struct RenderSettings {
     pub vmin: Option<f32>,
     pub vmax: Option<f32>,
     pub gamma_correction: bool,
+    pub axis_scale:Vector3<f32>
 }
 
 impl Default for RenderSettings {
@@ -300,6 +302,7 @@ impl Default for RenderSettings {
             vmin: None,
             vmax: None,
             gamma_correction: false,
+            axis_scale:Vector3::new(1.0,1.0,1.0)
         }
     }
 }
@@ -324,12 +327,15 @@ pub struct RenderSettingsUniform {
 impl RenderSettingsUniform {
     pub fn from_settings(settings: &RenderSettings, volume: &Volume) -> Self {
         let volume_aabb = volume.aabb;
+        let aabb_size = settings.axis_scale.mul_element_wise(volume_aabb.size());
+        let aabb_min = volume_aabb.center() - aabb_size / 2.;
+        let aabb_max = volume_aabb.center() + aabb_size / 2.;
 
         Self {
-            volume_aabb_min: volume_aabb.min.to_vec().extend(0.),
-            volume_aabb_max: volume_aabb.max.to_vec().extend(0.),
+            volume_aabb_min: aabb_min.to_vec().extend(0.),
+            volume_aabb_max: aabb_max.to_vec().extend(0.),
             time: settings.time,
-            time_steps: volume.timesteps as u32,
+            time_steps: volume.timesteps() as u32,
             clipping_min: settings
                 .clipping_aabb
                 .map(|bb| bb.min.to_vec().extend(0.))

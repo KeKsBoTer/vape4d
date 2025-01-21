@@ -8,7 +8,7 @@ description = "4D Volume Viewer"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wgpu = { version = "23.0", features = ["webgl"] }
+wgpu = { version = "23.0", features = ["webgl"], default-features = true}
 winit = "0.30.8"
 cgmath = { version = "0.18.0", features = [
     "bytemuck",
@@ -40,6 +40,7 @@ include_dir = { version = "0.7.3" }
 # python bindings
 pyo3 = { version = "0.23.4", features = ["extension-module"], optional = true }
 numpy = { version = "0.23.0", optional = true, features = ["half"] }
+ndarray = { version = "0.16.1", features = ["rayon"]}
 rfd = { version = "0.15.2", features = ["file-handle-inner"] }
 
 
@@ -78,6 +79,6 @@ name = "vape4d"
 path = "src/bin/vape4d.rs"
 
 [profile.web-release]
-inherits = "release"
+inherits = "dev"
 opt-level = "s"
-strip = "debuginfo"
+# strip = "debuginfo"

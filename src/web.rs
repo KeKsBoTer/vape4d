@@ -1,5 +1,6 @@
 use std::io::Cursor;
 
+use cgmath::Vector3;
 use instant::Duration;
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsError, JsValue};
@@ -51,6 +52,9 @@ pub struct InlineViewerConfig {
     pub vmax: Option<f32>,
     pub distance_scale: f32,
     pub duration: Option<f32>,
+    pub axis_scale_x: Option<f32>,
+    pub axis_scale_y: Option<f32>,
+    pub axis_scale_z: Option<f32>,
 }
 
 #[wasm_bindgen]
@@ -65,6 +69,9 @@ impl InlineViewerConfig {
         vmax: Option<f32>,
         distance_scale: f32,
         duration: Option<f32>,
+        axis_scale_x: Option<f32>,
+        axis_scale_y: Option<f32>,
+        axis_scale_z: Option<f32>,
     ) -> Self {
         Self {
             background_color,
@@ -75,6 +82,9 @@ impl InlineViewerConfig {
             vmax,
             distance_scale,
             duration,
+            axis_scale_x,
+            axis_scale_y,
+            axis_scale_z
         }
     }
 }
@@ -106,19 +116,13 @@ pub async fn viewer_wasm(
 
             show_cmap_select: settings.show_cmap_select,
             duration: settings.duration.map(Duration::from_secs_f32),
+            axis_scale: Vector3::new(
+                settings.axis_scale_x.unwrap_or(1.0),
+                settings.axis_scale_y.unwrap_or(1.0),
+                settings.axis_scale_z.unwrap_or(1.0),
+            ),
         },
-        None => RenderConfig {
-            no_vsync: false,
-            background_color: wgpu::Color::BLACK,
-            show_colormap_editor: true,
-            show_volume_info: true,
-
-            show_cmap_select: true,
-            vmin: None,
-            vmax: None,
-            duration: None,
-            distance_scale: 1.0,
-        },
+        None => RenderConfig::default(),
     };
 
     start_viewer(canvas_id, render_config, volume_data, colormap).await
@@ -239,7 +243,7 @@ async fn start_viewer(
 
     wasm_bindgen_futures::spawn_local(async move {
         let reader_v = Cursor::new(volume_data);
-        let volumes: Vec<Volume> = Volume::load_numpy(reader_v, true).unwrap();
+        let volumes: Volume = Volume::load_numpy(reader_v, true).unwrap();
         overlay.set_attribute("style", "display:none;").ok();
 
         open_window(volumes, colormap, render_config, canvas_id).await

@@ -31,7 +31,7 @@ where
 
     let data_file = File::open(&opt.input)?;
 
-    let volumes = Volume::load_numpy(BufReader::new(data_file), !opt.channel_first)
+    let volume= Volume::load_numpy(BufReader::new(data_file), !opt.channel_first)
         .expect("Failed to load volume");
 
     let cmap = opt
@@ -42,18 +42,11 @@ where
         })?;
 
     open_window(
-        volumes,
+        volume,
         cmap.into_linear_segmented(cmap::COLORMAP_RESOLUTION),
         RenderConfig {
             no_vsync: opt.no_vsync,
-            background_color: wgpu::Color::BLACK,
-            show_colormap_editor: true,
-            show_volume_info: true,
-            vmin: None,
-            vmax: None,
-            show_cmap_select: true,
-            duration: None,
-            distance_scale: 1.0,
+            ..Default::default()
         },
     )
     .await;

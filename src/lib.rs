@@ -1,7 +1,10 @@
 use camera::{Camera, OrthographicProjection};
 use cmap::LinearSegmentedColorMap;
 use controller::CameraController;
+use egui::FullOutput;
 use renderer::{RenderSettings, VolumeRenderer};
+#[cfg(target_arch = "wasm32")]
+use web_sys::HtmlCanvasElement;
 use std::{path::PathBuf, sync::Arc};
 use volume::VolumeGPU;
 
@@ -10,21 +13,14 @@ use instant::{Duration, Instant};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
 
-use wgpu::Backends;
-
 #[cfg(target_arch = "wasm32")]
 mod web;
 #[cfg(target_arch = "wasm32")]
 pub use web::*;
 
-use cgmath::{Vector2, Zero};
+use cgmath::{Vector2, Vector3, Zero};
 use winit::{
-    application::ApplicationHandler,
-    dpi::{LogicalSize, PhysicalSize},
-    event::{DeviceEvent, ElementState, WindowEvent},
-    event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
-    keyboard::{KeyCode, PhysicalKey},
-    window::{Window, WindowAttributes},
+    application::ApplicationHandler, dpi::{LogicalSize, PhysicalSize}, event::{DeviceEvent, ElementState, WindowEvent}, event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowAttributes}
 };
 
 use crate::{
@@ -57,9 +53,27 @@ pub struct RenderConfig {
     pub vmin: Option<f32>,
     pub vmax: Option<f32>,
     pub distance_scale: f32,
+    pub axis_scale: Vector3<f32>,
 
     pub show_cmap_select: bool,
     pub duration: Option<Duration>,
+}
+
+impl Default for RenderConfig {
+    fn default() -> Self {
+        Self {
+            no_vsync: false,
+            background_color: wgpu::Color::BLACK,
+            show_colormap_editor: true,
+            show_volume_info: true,
+            vmin: None,
+            vmax: None,
+            distance_scale: 1.0,
+            axis_scale: Vector3::new(1.0, 1.0, 1.0),
+            show_cmap_select: true,
+            duration: None,
+        }
+    }
 }
 
 pub struct WGPUContext {
@@ -112,7 +126,7 @@ pub struct WindowContext {
 
     background_color: wgpu::Color,
 
-    volumes: Vec<VolumeGPU>,
+    volume: VolumeGPU,
     renderer: VolumeRenderer,
 
     render_settings: RenderSettings,
@@ -134,20 +148,24 @@ impl WindowContext {
     // Creating some of the wgpu types requires async code
     async fn new(
         window: Window,
-        volumes: Vec<Volume>,
+        volume: Volume,
         cmap: LinearSegmentedColorMap,
         render_config: RenderConfig,
     ) -> anyhow::Result<Self> {
         let mut size = window.inner_size();
         if size.width == 0 || size.height == 0 {
-            size = PhysicalSize::new(800, 600);
+            size = LogicalSize::new(800, 600).to_physical(window.scale_factor());
+            #[cfg(target_arch = "wasm32")]
+            {
+                use winit::platform::web::WindowExtWebSys;
+                if let Some(canvas) = window.canvas(){
+                    size = PhysicalSize::new(canvas.width(), canvas.height());
+                }
+            };
         }
         let window = Arc::new(window);
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: Backends::PRIMARY.symmetric_difference(Backends::BROWSER_WEBGPU),
-            ..Default::default()
-        });
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
 
         let surface: wgpu::Surface = instance.create_surface(window.clone())?;
 
@@ -202,15 +220,17 @@ impl WindowContext {
             vmin: render_config.vmin,
             vmax: render_config.vmax,
             gamma_correction: !surface_format.is_srgb(),
+            axis_scale: Vector3::new(1., 1., 1.),
+
         };
 
         let mut controller = CameraController::new(0.1, 0.05);
-        controller.center = volumes[0].aabb.center();
+        controller.center = volume.aabb.center();
 
-        let radius = volumes[0].aabb.radius();
+        let radius = volume.aabb.radius();
         let ratio = size.width as f32 / size.height as f32;
         let camera = Camera::new_aabb_iso(
-            volumes[0].aabb.clone(),
+            volume.aabb.clone(),
             OrthographicProjection::new(Vector2::new(ratio, 1.) * 2. * radius, 1e-4, 100.),
         );
 
@@ -218,11 +238,8 @@ impl WindowContext {
             .duration
             .unwrap_or(Duration::from_secs_f32(5.));
 
-        let num_columns = volumes.len().min(4) as u32;
-        let volumes_gpu = volumes
-            .into_iter()
-            .map(|v| VolumeGPU::new(device, queue, v))
-            .collect();
+        let num_columns = volume.channels() as u32;
+        let volumes_gpu = VolumeGPU::new(device, queue, volume);
 
         let cmap_gpu = ColorMapGPU::new(&cmap, device, queue, COLORMAP_RESOLUTION);
         Ok(Self {
@@ -237,7 +254,7 @@ impl WindowContext {
             background_color: render_config.background_color,
             camera,
 
-            volumes: volumes_gpu,
+            volume: volumes_gpu,
             renderer,
             render_settings,
             cmap_gpu,
@@ -256,11 +273,8 @@ impl WindowContext {
     fn load_file(&mut self, path: &PathBuf) -> anyhow::Result<()> {
         let reader = std::fs::File::open(path)?;
         let volume = Volume::load_numpy(reader, true)?;
-        let volume_gpu = volume
-            .into_iter()
-            .map(|v| VolumeGPU::new(&self.wgpu_context.device, &self.wgpu_context.queue, v))
-            .collect();
-        self.volumes = volume_gpu;
+        let volume_gpu = VolumeGPU::new(&self.wgpu_context.device, &self.wgpu_context.queue, volume);
+        self.volume = volume_gpu;
         // self.controller.center = volume.aabb.center();
         self.camera
             .projection
@@ -285,16 +299,35 @@ impl WindowContext {
         }
     }
 
-    fn update(&mut self, dt: Duration) {
+    fn update(&mut self, dt: Duration) -> bool {
+        let mut requires_redraw = false;
+        let old_camera = self.camera.clone();
         self.controller.update_camera(&mut self.camera, dt);
+        if self.camera != old_camera {
+            requires_redraw = true;
+        }   
 
-        if self.playing && self.volumes[0].volume.timesteps > 1 {
+        if self.playing && self.volume.volume.timesteps() > 1 {
             self.render_settings.time += dt.as_secs_f32() / self.animation_duration.as_secs_f32();
             self.render_settings.time = self.render_settings.time.fract();
-        }
+
+            requires_redraw = true;
+        } 
+        return requires_redraw;
     }
 
-    fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    /// returns whether redraw is required
+    fn ui(&mut self) -> (bool, egui::FullOutput) {
+        self.ui_renderer.begin_frame(&self.window);
+        let request_redraw = ui::ui(self);
+
+        let shapes = self.ui_renderer.end_frame(&self.window);
+
+        return (request_redraw, shapes);
+    }
+
+
+    fn render(&mut self, shapes: Option<FullOutput>) -> Result<(), wgpu::SurfaceError> {
         let window_size = self.window.inner_size();
         if window_size.width != self.config.width || window_size.height != self.config.height {
             self.resize(window_size, None);
@@ -317,16 +350,12 @@ impl WindowContext {
         let mut frame_data = Vec::new();
 
         let columns = self.num_columns as usize;
-        let rows = (self.volumes.len() as f32 / columns as f32).ceil() as usize;
+        let rows = (self.volume.volume.channels() as f32 / columns as f32).ceil() as usize;
         let cell_width = self.config.width as f32 / columns as f32;
         let cell_height = self.config.height as f32 / rows as f32;
 
-        let ui_state = if self.ui_visible {
-            self.ui_renderer.begin_frame(&self.window);
-            ui::ui(self);
-
-            let shapes = self.ui_renderer.end_frame(&self.window);
-            Some(self.ui_renderer.prepare(
+        let ui_state = shapes.map(|shapes| {
+            self.ui_renderer.prepare(
                 PhysicalSize {
                     width: output.texture.size().width,
                     height: output.texture.size().height,
@@ -336,32 +365,32 @@ impl WindowContext {
                 &self.wgpu_context.queue,
                 &mut encoder,
                 shapes,
-            ))
-        } else {
-            None
-        };
+            )
+        });
 
         if let Some(selected_channel) = self.selected_channel {
             let camera = self.camera.clone();
             frame_data.push(self.renderer.prepare(
                 &self.wgpu_context.device,
-                &self.volumes[selected_channel],
+                &self.volume,
                 &camera,
                 &self.render_settings,
                 &self.cmap_gpu,
+                selected_channel
             ));
         } else {
-            for v in &self.volumes {
+            for channel in 0..self.volume.volume.channels() {
                 let mut camera = self.camera.clone();
                 camera
                     .projection
                     .resize(cell_width as u32, cell_height as u32);
                 frame_data.push(self.renderer.prepare(
                     &self.wgpu_context.device,
-                    &v,
+                    &self.volume,
                     &camera,
                     &self.render_settings,
                     &self.cmap_gpu,
+                    channel
                 ));
             }
         }
@@ -417,7 +446,7 @@ impl WindowContext {
 
 pub struct App {
     state: Option<WindowContext>,
-    volume: Vec<Volume>,
+    volume: Volume,
     config: RenderConfig,
     cmap: LinearSegmentedColorMap,
 
@@ -432,7 +461,7 @@ pub struct App {
 impl App {
     fn new(
         event_loop_proxy: EventLoopProxy<WindowContext>,
-        volume: Vec<Volume>,
+        volume: Volume,
         cmap: LinearSegmentedColorMap,
         config: RenderConfig,
         #[cfg(target_arch = "wasm32")] canvas_id: String,
@@ -474,8 +503,10 @@ impl ApplicationHandler<WindowContext> for App {
                 let window = web_sys::window().unwrap();
                 let document = window.document().unwrap();
                 let canvas = document.get_element_by_id(&self.canvas_id).unwrap();
-                let html_canvas_element = canvas.unchecked_into();
-                window_attributes = window_attributes.with_canvas(Some(html_canvas_element));
+                let html_canvas_element:HtmlCanvasElement = canvas.unchecked_into();
+                let width = html_canvas_element.client_width() as u32;
+                let height = html_canvas_element.client_height() as u32;
+                window_attributes = window_attributes.with_canvas(Some(html_canvas_element)).with_inner_size(winit::dpi::Size::Physical(PhysicalSize::new(width, height)));
             }
 
             let window = event_loop.create_window(window_attributes).unwrap();
@@ -487,6 +518,7 @@ impl ApplicationHandler<WindowContext> for App {
                     self.volume.clone(),
                     self.cmap.clone(),
                     self.config.clone(),
+
                 );
                 wasm_bindgen_futures::spawn_local(async move {
                     let gfx = window_context.await.unwrap();
@@ -587,22 +619,36 @@ impl ApplicationHandler<WindowContext> for App {
                         }
                     }
                     WindowEvent::RedrawRequested => {
+                        if !self.config.no_vsync {
+                            // make sure the next redraw is called with a small delay
+                            event_loop.set_control_flow(ControlFlow::wait_duration(
+                                Duration::from_millis(1000/60)
+                            ));
+                        }
                         let now = Instant::now();
                         let dt = now - self.last_draw;
                         self.last_draw = now;
-                        state.update(dt);
+                        let request_redraw = state.update(dt);
 
-                        match state.render() {
-                            Ok(_) => {}
-                            // Reconfigure the surface if lost
-                            Err(wgpu::SurfaceError::Lost) => {
-                                log::error!("lost surface!");
-                                state.resize(state.window.inner_size(), None)
+
+                        let (redraw_ui, ui_shapes) = state.ui();
+
+                        if request_redraw || redraw_ui {
+                            match state.render(state.ui_visible.then_some(ui_shapes)) {
+                                Ok(_) => {}
+                                // Reconfigure the surface if lost
+                                Err(wgpu::SurfaceError::Lost) => {
+                                    log::error!("lost surface!");
+                                    state.resize(state.window.inner_size(), None)
+                                }
+                                // The system is out of memory, we should probably quit
+                                Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
+                                // All other errors (Outdated, Timeout) should be resolved by the next frame
+                                Err(e) => println!("error: {:?}", e),
                             }
-                            // The system is out of memory, we should probably quit
-                            Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
-                            // All other errors (Outdated, Timeout) should be resolved by the next frame
-                            Err(e) => println!("error: {:?}", e),
+                        }
+                        if self.config.no_vsync {
+                            state.window.request_redraw();
                         }
                     }
                     _ => {}
@@ -645,9 +691,6 @@ impl ApplicationHandler<WindowContext> for App {
     }
 
     fn about_to_wait(&mut self, #[allow(unused_variables)] event_loop: &ActiveEventLoop) {
-        if let Some(state) = &self.state {
-            state.window.request_redraw();
-        }
         #[cfg(target_arch = "wasm32")]
         use winit::platform::web::WindowExtWebSys;
         #[cfg(target_arch = "wasm32")]
@@ -668,7 +711,7 @@ impl ApplicationHandler<WindowContext> for App {
 }
 
 pub async fn open_window(
-    volumes: Vec<Volume>,
+    volumes: Volume,
     cmap: LinearSegmentedColorMap,
     config: RenderConfig,
     #[cfg(target_arch = "wasm32")] canvas_id: String,

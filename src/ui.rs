@@ -10,9 +10,9 @@ use crate::{
 
 use crate::cmap::COLORMAPS;
 
-pub(crate) fn ui(state: &mut WindowContext) {
+pub(crate) fn ui(state: &mut WindowContext) -> bool{
     let ctx = state.ui_renderer.winit.egui_ctx();
-    let with_animation = state.volumes[0].volume.timesteps > 1;
+    let with_animation = state.volume.volume.timesteps() > 1;
     egui::Window::new("Render Settings").show(ctx, |ui| {
         egui::Grid::new("render_settings")
             .num_columns(2)
@@ -22,8 +22,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     ui.label("Time");
                     ui.add(
                         egui::Slider::new(&mut state.render_settings.time, (0.)..=(1.))
-                            .clamping(SliderClamping::Always)
-                            .fixed_decimals(2),
+                            .clamping(SliderClamping::Always).custom_formatter(|v,_|((v*100.).round()/100.).to_string()) // fixed_decimals(2) modifies the value so do not use it here
                     );
                     if ui.button(if state.playing { "||" } else { "▶" }).clicked() {
                         state.playing = !state.playing;
@@ -53,6 +52,15 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 );
                 ui.end_row();
 
+
+                ui.label("Axis Scale");
+                ui.horizontal(|ui|{
+                    ui.add(egui::DragValue::new(&mut state.render_settings.axis_scale.x).speed(0.01).range(RangeInclusive::new(1., 1e2)).clamp_existing_to_range(true).suffix("x"));
+                    ui.add(egui::DragValue::new(&mut state.render_settings.axis_scale.y).speed(0.01).range(RangeInclusive::new(1., 1e2)).clamp_existing_to_range(true).suffix("y"));
+                    ui.add(egui::DragValue::new(&mut state.render_settings.axis_scale.z).speed(0.01).range(RangeInclusive::new(1., 1e2)).clamp_existing_to_range(true).suffix("z"));
+                });
+                ui.end_row();
+                
                 ui.label("Distance Scale");
                 ui.add(
                     egui::DragValue::new(&mut state.render_settings.distance_scale)
@@ -75,7 +83,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     a: bg[3] as f64,
                 };
                 ui.end_row();
-                if state.volumes.len() > 1 {
+                if state.volume.volume.channels() > 1 {
                     ui.label("Channel");
                     egui::ComboBox::new("selected_channel", "")
                         .selected_text(
@@ -85,7 +93,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         )
                         .show_ui(ui, |ui| {
                             ui.selectable_value(&mut state.selected_channel, None, "All");
-                            for i in 0..state.volumes.len() {
+                            for i in 0..state.volume.volume.channels() {
                                 ui.selectable_value(
                                     &mut state.selected_channel,
                                     Some(i),
@@ -96,7 +104,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     ui.end_row();
                     if state.selected_channel.is_none() {
                         ui.label("Number of Rows");
-                        let max_rows = state.volumes.len();
+                        let max_rows = state.volume.volume.channels();
                         ui.add(
                             egui::DragValue::new(&mut state.num_columns)
                                 .range(1u32..=max_rows as u32),
@@ -158,14 +166,14 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     let min_b = state
                         .render_settings
                         .vmin
-                        .unwrap_or(state.volumes[0].volume.min_value);
+                        .unwrap_or(state.volume.volume.min_value);
                     let max_b = state
                         .render_settings
                         .vmax
-                        .unwrap_or(state.volumes[0].volume.max_value);
+                        .unwrap_or(state.volume.volume.max_value);
 
-                    let vmin_min = state.volumes[0].volume.min_value.min(min_b);
-                    let vmax_max = state.volumes[0].volume.max_value.max(max_b);
+                    let vmin_min = state.volume.volume.min_value.min(min_b);
+                    let vmax_max = state.volume.volume.max_value.max(max_b);
                     optional_drag(
                         ui,
                         &mut state.render_settings.vmin,
@@ -259,11 +267,11 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 let vmin = state
                     .render_settings
                     .vmin
-                    .unwrap_or(state.volumes[0].volume.min_value);
+                    .unwrap_or(state.volume.volume.min_value);
                 let vmax = state
                     .render_settings
                     .vmax
-                    .unwrap_or(state.volumes[0].volume.max_value);
+                    .unwrap_or(state.volume.volume.max_value);
                 show_cmap(ui, egui::Id::new("cmap preview"), &state.cmap, vmin, vmax);
 
                 ui.heading("Alpha Channel");
@@ -342,19 +350,19 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 .striped(true)
                 .show(ui, |ui| {
                     ui.label("timesteps");
-                    ui.label(state.volumes[0].volume.timesteps.to_string());
+                    ui.label(state.volume.volume.timesteps().to_string());
                     ui.end_row();
                     ui.label("channels");
-                    ui.label(state.volumes.len().to_string());
+                    ui.label(state.volume.volume.channels().to_string());
                     ui.end_row();
                     ui.label("resolution");
-                    let res = state.volumes[0].volume.resolution;
+                    let res = state.volume.volume.size();
                     ui.label(format!("{}x{}x{} (WxHxD)", res.x, res.y, res.z));
                     ui.end_row();
                     ui.label("value range");
                     ui.label(format!(
                         "[{} , {}]",
-                        state.volumes[0].volume.min_value, state.volumes[0].volume.max_value
+                        state.volume.volume.min_value, state.volume.volume.max_value
                     ));
                     ui.end_row();
                 });
@@ -413,6 +421,8 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 ));
             }
         });
+        let repaint = ctx.has_requested_repaint();
+        return repaint;
 }
 
 pub fn argsort<T: PartialOrd>(data: &[T]) -> Vec<usize> {

@@ -1,4 +1,4 @@
-use cgmath::Vector2;
+use cgmath::{Vector2, Vector3};
 use half::f16;
 use image::{ImageBuffer, Rgba};
 use numpy::{ndarray::StrideShape, IntoPyArray, PyArray4, PyReadonlyArrayDyn};
@@ -15,7 +15,7 @@ use crate::{
 #[pymodule]
 fn vape4d<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
     #[pyfn(m)]
-    #[pyo3(signature = (volume, cmap, width, height, time, background, distance_scale, vmin=None, vmax=None, spatial_interpolation=None, temporal_interpolation=None))]
+    #[pyo3(signature = (volume, cmap, width, height, time, background, distance_scale, vmin=None, vmax=None, spatial_interpolation=None, temporal_interpolation=None, axis_scale=None))]
     fn render_video<'py>(
         py: Python<'py>,
         volume: PyReadonlyArrayDyn<'py, f16>,
@@ -29,6 +29,7 @@ fn vape4d<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
         vmax: Option<f32>,
         spatial_interpolation: Option<String>,
         temporal_interpolation: Option<String>,
+        axis_scale:Option<(f32,f32,f32)>,
     ) -> Bound<'py, PyArray4<u8>> {
         let volume = Volume::from_array(volume.as_array());
         let cmap = ListedColorMap::from_array(cmap.as_array());
@@ -52,6 +53,7 @@ fn vape4d<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
             temporal_interpolation
                 .map(|s| parse_interpolation(&s).unwrap())
                 .unwrap_or_default(),
+            axis_scale.map(|(x,y,z)| Vector3::new(x,y,z)),
         ))
         .unwrap();
 

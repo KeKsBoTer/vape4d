@@ -24,7 +24,7 @@ pub struct CameraController {
     pub left_mouse_pressed: bool,
     pub right_mouse_pressed: bool,
     pub alt_pressed: bool,
-    pub user_inptut: bool,
+    pub user_input: bool,
 }
 
 impl CameraController {
@@ -41,7 +41,7 @@ impl CameraController {
             left_mouse_pressed: false,
             right_mouse_pressed: false,
             alt_pressed: false,
-            user_inptut: false,
+            user_input: false,
         }
     }
 
@@ -82,7 +82,7 @@ impl CameraController {
             }
             _ => false,
         };
-        self.user_inptut = processed;
+        self.user_input = processed;
         return processed;
     }
 
@@ -90,18 +90,18 @@ impl CameraController {
         if self.left_mouse_pressed {
             self.rotation.x += mouse_dx as f32;
             self.rotation.y += mouse_dy as f32;
-            self.user_inptut = true;
+            self.user_input = true;
         }
         if self.right_mouse_pressed {
             self.shift.y += -mouse_dx as f32;
             self.shift.x += mouse_dy as f32;
-            self.user_inptut = true;
+            self.user_input = true;
         }
     }
 
     pub fn process_scroll(&mut self, dy: f32) {
         self.scroll += -dy;
-        self.user_inptut = true;
+        self.user_input = true;
     }
 
     pub fn update_camera(&mut self, camera: &mut Camera<OrthographicProjection>, dt: Duration) {
@@ -166,7 +166,7 @@ impl CameraController {
         if self.scroll.abs() < 1e-4 {
             self.scroll = 0.;
         }
-        self.user_inptut = false;
+        self.user_input = false;
     }
 }
 

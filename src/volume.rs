@@ -1,8 +1,9 @@
 use bytemuck::Zeroable;
-use cgmath::{BaseNum, EuclideanSpace, MetricSpace, Point3, Vector3, Zero};
+use cgmath::{BaseNum, EuclideanSpace, MetricSpace, One, Point3, Vector3};
 use half::f16;
 #[cfg(target_arch = "wasm32")]
 use instant::Instant;
+use ndarray::{Array5, Axis, StrideShape};
 use npyz::{npz, Deserialize, NpyFile};
 use num_traits::Float;
 #[cfg(feature = "python")]
@@ -14,20 +15,29 @@ use wgpu::util::{DeviceExt, TextureDataOrder};
 
 #[derive(Clone)]
 pub struct Volume {
-    pub timesteps: u32,
-    pub resolution: Vector3<u32>,
     pub aabb: Aabb<f32>,
     pub min_value: f32,
     pub max_value: f32,
-    data: Vec<f16>,
+    /// array of shape [channels, timesteps, z, y, x]
+    data: Array5<f16>,
 }
 
 impl Volume {
     #[cfg(feature = "python")]
-    pub fn from_array(data: ArrayViewD<f16>) -> Self {
+    pub fn from_array(arr: ArrayViewD<f16>) -> Self {
+        use numpy::Ix5;
+
+        let shape = arr.shape().to_vec();
+
+        let arr = match  shape.len() {
+            3 => arr.insert_axis(Axis(0)).insert_axis(Axis(0)),
+            4 => arr.insert_axis(Axis(0)),
+            _ => arr,
+            
+        };
+        let data: Array5<f16> = arr.into_dimensionality::<Ix5>().unwrap().into_owned();
         let shape = data.shape().to_vec();
-        let resolution = [shape[1] as u32, shape[2] as u32, shape[3] as u32];
-        let vec_data = data.to_slice().unwrap().to_vec();
+        let resolution = [shape[2] as u32, shape[3] as u32, shape[4] as u32];
 
         let res_min = resolution.iter().min().unwrap();
         let aabb = Aabb {
@@ -38,19 +48,27 @@ impl Volume {
                 resolution[0] as f32 / *res_min as f32,
             ),
         };
-        let vmin = *vec_data.iter().min_by(|a, b| a.total_cmp(b)).unwrap();
-        let vmax = *vec_data.iter().max_by(|a, b| a.total_cmp(b)).unwrap();
+
+        let (min_value, mut max_value) = data
+            .iter()
+            .fold((f16::MAX, f16::MIN), |(acc_min, acc_max), b| {
+                (acc_min.min(*b), acc_max.max(*b))
+            });
+
+        if min_value >= max_value {
+            max_value = min_value + f16::one();
+        }
+
+
         Self {
-            timesteps: shape[0] as u32,
-            resolution: resolution.into(),
             aabb,
-            min_value: vmin.to_f32(),
-            max_value: vmax.to_f32(),
-            data: vec_data,
+            min_value: min_value.to_f32(),
+            max_value: max_value.to_f32(),
+            data: data,
         }
     }
 
-    pub fn load_npy<'a, R>(reader: R, time_first: bool) -> anyhow::Result<Vec<Self>>
+    pub fn load_npy<'a, R>(reader: R, time_first: bool) -> anyhow::Result<Self>
     where
         R: Read + Seek,
     {
@@ -58,85 +76,88 @@ impl Volume {
         Self::read(array, time_first)
     }
 
-    pub fn read_dyn<'a, R, P>(array: NpyFile<R>, time_first: bool) -> anyhow::Result<Vec<Self>>
+    pub fn channels(&self) -> usize {
+        self.data.shape()[0]
+    }
+
+    pub fn timesteps(&self) -> usize {
+        self.data.shape()[1]
+    }
+
+    /// returns width, height, depth
+    pub fn size(&self) -> Vector3<u32> {
+        Vector3 {
+            x: self.data.shape()[4] as u32,
+            y: self.data.shape()[3] as u32,
+            z: self.data.shape()[2] as u32,
+        }
+    }
+
+    pub fn read_dyn<'a, R, P>(array: NpyFile<R>, time_first: bool) -> anyhow::Result<Self>
     where
         R: Read,
-        P: Into<f64> + Deserialize,
+        P: Into<f64> + Copy + Deserialize,
     {
         let start = Instant::now();
-        let time_dim = if time_first { 0 } else { 1 };
-        let channel_dim = if time_first { 1 } else { 0 };
-        let timesteps = array.shape()[time_dim] as usize;
-        let channels = array.shape()[channel_dim] as usize;
-        log::debug!("size: {:?}", array.shape());
-        if array.shape().len() != 5 {
-            anyhow::bail!("unsupported shape: {:?}", array.shape());
-        }
-        let resolution = [
-            array.shape()[2] as u32,
-            array.shape()[3] as u32,
-            array.shape()[4] as u32,
-        ];
-        let numel = resolution.iter().product::<u32>() as usize;
 
-        let strides = array.strides().to_vec();
-        let mut volumes: Vec<Vec<f16>> = vec![vec![f16::zero(); numel * timesteps]; channels];
+        let shape: Vec<u64> = array.shape().to_vec();
+        log::debug!("size: {:?}", &shape);
 
-        let mut min_value = f32::MAX;
-        let mut max_value = f32::MIN;
-        for (i, v) in array.data::<P>()?.enumerate() {
-            let v64: f64 = v.unwrap().into();
-            let v32: f32 = v64 as f32;
-            let v = f16::from_f32(v32);
-            if v32 > max_value {
-                max_value = v32;
-            }
-            if v32 < min_value {
-                min_value = v32;
-            }
-            let (c, idx) = if time_first {
-                let t = i / strides[0] as usize;
-                let c = (i - strides[0] as usize * t) / strides[1] as usize;
-                let idx = t * numel + (i - strides[0] as usize * t - strides[1] as usize * c);
-                (c, idx)
-            } else {
-                let c = i / strides[0] as usize;
-                let t = (i - strides[0] as usize * c) / strides[1] as usize;
-                let idx = t * numel + (i - strides[0] as usize * c - strides[1] as usize * t);
-                (c, idx)
-            };
-            volumes[c][idx] = v;
+        if shape.len() != 5 {
+            anyhow::bail!("unsupported shape: {:?}", shape);
         }
 
-        if min_value == max_value {
-            max_value = min_value + 1.0;
+        // TODO take order into account
+        let shape_stride: StrideShape<_> = (
+            shape[0] as usize,
+            shape[1] as usize,
+            shape[2] as usize,
+            shape[3] as usize,
+            shape[4] as usize,
+        )
+            .into();
+
+        let data = array.into_vec::<P>()?;
+        let mut arr = Array5::from_shape_vec(shape_stride, data)?.map(|v| {
+            let v64: f64 = (*v).into();
+            f16::from_f64(v64)
+        });
+
+        let (min_value, mut max_value) = arr
+            .iter()
+            .fold((f16::MAX, f16::MIN), |(acc_min, acc_max), b| {
+                (acc_min.min(*b), acc_max.max(*b))
+            });
+
+        if min_value >= max_value {
+            max_value = min_value + f16::one();
         }
-        let res_min = resolution.iter().min().unwrap();
+
+        if time_first {
+            arr.swap_axes(0, 1);
+        }
+
+        let res_min = shape.iter().skip(2).min().unwrap();
 
         let aabb = Aabb {
             min: Point3::new(0.0, 0.0, 0.0),
             max: Point3::new(
-                resolution[2] as f32 / *res_min as f32,
-                resolution[1] as f32 / *res_min as f32,
-                resolution[0] as f32 / *res_min as f32,
+                shape[2] as f32 / *res_min as f32,
+                shape[3] as f32 / *res_min as f32,
+                shape[4] as f32 / *res_min as f32,
             ),
         };
-
-        let results = (0..channels as usize)
-            .map(|c| Self {
-                timesteps: timesteps as u32,
-                resolution: resolution.into(),
-                aabb,
-                max_value,
-                min_value,
-                data: volumes[c].clone(),
-            })
-            .collect();
         log::info!("read volume in {:?}", start.elapsed());
-        Ok(results)
+
+        Ok(Self {
+            aabb,
+            min_value: min_value.to_f32(),
+            max_value: max_value.to_f32(),
+            data: arr,
+        })
     }
 
-    pub fn read<'a, R>(array: NpyFile<R>, time_first: bool) -> anyhow::Result<Vec<Self>>
+    pub fn read<'a, R>(array: NpyFile<R>, time_first: bool) -> anyhow::Result<Self>
     where
         R: Read,
     {
@@ -163,7 +184,7 @@ impl Volume {
             d => anyhow::bail!("unsupported type {:}", d.descr()),
         }
     }
-    pub fn load_numpy<'a, R>(mut reader: R, time_first: bool) -> anyhow::Result<Vec<Self>>
+    pub fn load_numpy<'a, R>(mut reader: R, time_first: bool) -> anyhow::Result<Self>
     where
         R: Read + Seek,
     {
@@ -179,7 +200,7 @@ impl Volume {
         }
     }
 
-    pub fn load_npz<'a, R>(reader: R, time_first: bool) -> anyhow::Result<Vec<Self>>
+    pub fn load_npz<'a, R>(reader: R, time_first: bool) -> anyhow::Result<Self>
     where
         R: Read + Seek,
     {
@@ -195,45 +216,55 @@ impl Volume {
 }
 
 pub struct VolumeGPU {
-    pub(crate) textures: Vec<wgpu::Texture>,
+    textures: Vec<Vec<wgpu::Texture>>,
     pub(crate) volume: Volume,
 }
 
 impl VolumeGPU {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, volume: Volume) -> Self {
-        let textures = (0..volume.timesteps)
-            .map(|i| {
-                device.create_texture_with_data(
-                    queue,
-                    &wgpu::TextureDescriptor {
-                        label: Some(format!("volume texture {}", i).as_str()),
-                        size: wgpu::Extent3d {
-                            width: volume.resolution[2],
-                            height: volume.resolution[1],
-                            depth_or_array_layers: volume.resolution[0],
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D3,
-                        format: wgpu::TextureFormat::R16Float,
-                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                        view_formats: &[],
-                    },
-                    TextureDataOrder::LayerMajor,
-                    bytemuck::cast_slice(
-                        &volume.data[(i
-                            * volume.resolution[0]
-                            * volume.resolution[1]
-                            * volume.resolution[2]) as usize
-                            ..((i + 1)
-                                * volume.resolution[0]
-                                * volume.resolution[1]
-                                * volume.resolution[2]) as usize],
-                    ),
-                )
+        let resolution = volume.size();
+
+        let textures = volume
+            .data
+            .axis_iter(Axis(0))
+            .enumerate()
+            .map(|(c, data)| {
+                data.axis_iter(Axis(0))
+                    .enumerate()
+                    .map(|(t, data)| {
+                        device.create_texture_with_data(
+                            queue,
+                            &wgpu::TextureDescriptor {
+                                label: Some(
+                                    format!("volume texture channel {}, timestep {}", c, t)
+                                        .as_str(),
+                                ),
+                                size: wgpu::Extent3d {
+                                    width: resolution.x,
+                                    height: resolution.y,
+                                    depth_or_array_layers: resolution.z,
+                                },
+                                mip_level_count: 1,
+                                sample_count: 1,
+                                dimension: wgpu::TextureDimension::D3,
+                                format: wgpu::TextureFormat::R16Float,
+                                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                                    | wgpu::TextureUsages::COPY_DST,
+                                view_formats: &[],
+                            },
+                            TextureDataOrder::LayerMajor,
+                            bytemuck::cast_slice(data.as_slice().unwrap()),
+                        )
+                    })
+                    .collect()
             })
             .collect();
+
         Self { textures, volume }
+    }
+
+    pub fn get_texture(&self, channel: usize, timestep: usize) -> &wgpu::Texture {
+        &self.textures[channel][timestep]
     }
 }
 
@@ -259,5 +290,9 @@ impl<F: Float + BaseNum> Aabb<F> {
     /// radius of a sphere that contains the aabb
     pub fn radius(&self) -> F {
         self.min.distance(self.max) / (F::one() + F::one())
+    }
+
+    pub fn size(&self) -> Vector3<F> {
+        self.max - self.min
     }
 }
