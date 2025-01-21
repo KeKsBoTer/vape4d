@@ -23,7 +23,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     ui.label("Time");
                     ui.add(
                         egui::Slider::new(&mut state.render_settings.time, (0.)..=(1.))
-                            .clamp_to_range(true)
+                            .clamping(SliderClamping::Always)
                             .fixed_decimals(2),
                     );
                     if ui.button(if state.playing { "||" } else { "▶" }).clicked() {

@@ -6,8 +6,6 @@ use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::js_sys::{ArrayBuffer, Uint8Array};
 use web_sys::{Request, RequestInit, RequestMode, Response};
-use winit::platform::web::WindowBuilderExtWebSys;
-use winit::window::WindowBuilder;
 
 use crate::cmap::{self, GenericColorMap, COLORMAP_RESOLUTION};
 use crate::volume::Volume;
@@ -128,9 +126,9 @@ pub async fn viewer_wasm(
 /// Download a file from a given url
 /// returns body bytes
 pub async fn download_file(window: web_sys::Window, url: String) -> Result<Vec<u8>, JsValue> {
-    let mut opts = RequestInit::new();
-    opts.method("GET");
-    opts.mode(RequestMode::Cors);
+    let opts = RequestInit::new();
+    opts.set_method("GET");
+    opts.set_mode(RequestMode::Cors);
 
     let request = Request::new_with_str_and_init(&url, &opts)?;
 
@@ -209,12 +207,6 @@ async fn start_viewer(
     let document = window
         .document()
         .ok_or(JsError::new("cannot access document"))?;
-    let canvas = document
-        .get_element_by_id(&canvas_id)
-        .ok_or(JsError::new("cannot find canvas"))?
-        .dyn_into::<web_sys::HtmlCanvasElement>()?;
-
-    let window_builder = WindowBuilder::new().with_canvas(Some(canvas));
 
     let spinner = document
         .get_element_by_id("spinner")
@@ -249,7 +241,7 @@ async fn start_viewer(
         let volumes: Vec<Volume> = Volume::load_numpy(reader_v, true).unwrap();
         overlay.set_attribute("style", "display:none;").ok();
 
-        open_window(window_builder, volumes, colormap, render_config).await
+        open_window(volumes, colormap, render_config,canvas_id).await
     });
     Ok(())
 }

@@ -12,6 +12,7 @@ use std::io::{Read, Seek};
 use std::time::Instant;
 use wgpu::util::{DeviceExt, TextureDataOrder};
 
+#[derive(Clone)]
 pub struct Volume {
     pub timesteps: u32,
     pub resolution: Vector3<u32>,

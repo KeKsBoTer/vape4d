@@ -19,11 +19,12 @@ pub use web::*;
 
 use cgmath::{Vector2, Zero};
 use winit::{
-    dpi::PhysicalSize,
-    event::{DeviceEvent, ElementState, Event, WindowEvent},
-    event_loop::EventLoop,
+    application::ApplicationHandler,
+    dpi::{LogicalSize, PhysicalSize},
+    event::{DeviceEvent, ElementState, WindowEvent},
+    event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy},
     keyboard::{KeyCode, PhysicalKey},
-    window::{Window, WindowBuilder},
+    window::{Window, WindowAttributes},
 };
 
 use crate::{
@@ -40,12 +41,11 @@ mod ui;
 mod ui_renderer;
 mod viewer;
 pub mod volume;
-pub use viewer::viewer;
 #[cfg(feature = "python")]
 pub mod py;
 // pub mod image;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RenderConfig {
     pub no_vsync: bool,
     pub background_color: wgpu::Color,
@@ -79,6 +79,7 @@ impl WGPUContext {
                     required_features,
                     required_limits: adapter.limits(),
                     label: None,
+                    memory_hints: wgpu::MemoryHints::Performance,
                 },
                 None,
             )
@@ -131,7 +132,7 @@ impl WindowContext {
         window: Window,
         volumes: Vec<Volume>,
         cmap: LinearSegmentedColorMap,
-        render_config: &RenderConfig,
+        render_config: RenderConfig,
     ) -> anyhow::Result<Self> {
         let mut size = window.inner_size();
         if size.width == 0 || size.height == 0 {
@@ -362,18 +363,20 @@ impl WindowContext {
         }
 
         {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view_rgb,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.background_color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
+            let mut render_pass = encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("render pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view_rgb,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(self.background_color),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                })
+                .forget_lifetime();
             for (i, v) in frame_data.iter().enumerate() {
                 if self.selected_channel.is_none() {
                     let column = i % columns;
@@ -408,141 +411,259 @@ impl WindowContext {
     }
 }
 
-pub async fn open_window(
-    window_builder: WindowBuilder,
-    volumes: Vec<Volume>,
-    cmap: LinearSegmentedColorMap,
+pub struct App {
+    state: Option<WindowContext>,
+    volume: Vec<Volume>,
     config: RenderConfig,
-) {
-    let event_loop = EventLoop::new().unwrap();
+    cmap: LinearSegmentedColorMap,
 
-    let version = env!("CARGO_PKG_VERSION");
-    let name = env!("CARGO_PKG_NAME");
+    last_touch_position: Vector2<f64>,
+    last_draw: Instant,
 
-    let window = window_builder
-        .with_title(format!("{name} {version}"))
-        .build(&event_loop)
-        .unwrap();
+    event_loop_proxy: Option<EventLoopProxy<WindowContext>>,
+    #[cfg(target_arch = "wasm32")]
+    canvas_id: String,
+}
 
-    let mut state = WindowContext::new(window, volumes, cmap, &config)
-        .await
-        .unwrap();
+impl App {
+    fn new(
+        event_loop_proxy: EventLoopProxy<WindowContext>,
+        volume: Vec<Volume>,
+        cmap: LinearSegmentedColorMap,
+        config: RenderConfig,
+        #[cfg(target_arch = "wasm32")]
+        canvas_id: String
+    ) -> Self {
+        Self {
+            state: None,
+            volume,
+            config,
+            last_touch_position:Vector2::zero(),
+            last_draw: Instant::now(),
+            event_loop_proxy: Some(event_loop_proxy),
+            cmap,
+            #[cfg(target_arch = "wasm32")]
+            canvas_id
+        }
+    }
+}
 
-    let mut last = Instant::now();
-    let mut last_touch_position = Vector2::zero();
-    event_loop.run(move |event,target| 
-       
-        match event {
-        Event::WindowEvent {
-            ref event,
-            window_id,
-        } if window_id == state.window.id() && !state.ui_renderer.on_event(&state.window,event) => match event {
-            WindowEvent::Resized(physical_size) => {
-                state.resize(*physical_size, None);
+impl ApplicationHandler<WindowContext> for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(event_loop_proxy) = self.event_loop_proxy.take() else {
+            // event_loop_proxy is already spent - we already constructed Graphics
+            return;
+        };
+        if self.state.is_none() {
+            let version = env!("CARGO_PKG_VERSION");
+            let name = env!("CARGO_PKG_NAME");
+
+            #[allow(unused_mut)]
+            let mut window_attributes = WindowAttributes::default()
+                .with_title(format!("{name} {version}"))
+                .with_inner_size(winit::dpi::Size::Logical(LogicalSize::new(800., 600.)));
+
+            #[cfg(target_arch = "wasm32")]
+            {
+                use web_sys::wasm_bindgen::JsCast;
+                use winit::platform::web::WindowAttributesExtWebSys;
+
+                let window = web_sys::window().unwrap();
+                let document = window.document().unwrap();
+                let canvas = document.get_element_by_id(&self.canvas_id).unwrap();
+                let html_canvas_element = canvas.unchecked_into();
+                window_attributes = window_attributes.with_canvas(Some(html_canvas_element));
             }
-            WindowEvent::ScaleFactorChanged {
-                scale_factor,
-                ..
-            } => {
-                state.scale_factor = *scale_factor as f32;
+
+            let window = event_loop.create_window(window_attributes).unwrap();
+
+            #[cfg(target_arch = "wasm32")]
+            {
+                let window_context =
+                    WindowContext::new(window, self.volume.clone(), self.cmap.clone(),self.config.clone());
+                wasm_bindgen_futures::spawn_local(async move {
+                    let gfx = window_context.await.unwrap();
+                    assert!(event_loop_proxy.send_event(gfx).is_ok());
+                });
             }
-            WindowEvent::CloseRequested => {log::info!("close!");target.exit()},
-            WindowEvent::ModifiersChanged(m)=>{
-                state.controller.alt_pressed = m.state().alt_key();
+
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let window_context =
+                    WindowContext::new(window, self.volume.clone(), self.cmap.clone(),self.config.clone());
+                let context = pollster::block_on(window_context).unwrap();
+                assert!(event_loop_proxy.send_event(context).is_ok());
             }
-            WindowEvent::KeyboardInput { event, .. } => {
-                if let PhysicalKey::Code(key) = event.physical_key{
-                    state
-                        .controller
-                        .process_keyboard(key, event.state == ElementState::Pressed);
-                    if key == KeyCode::KeyU && event.state == ElementState::Released{
-                        state.ui_visible = !state.ui_visible;
+        }
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: winit::window::WindowId,
+        event: WindowEvent,
+    ) {
+        if let Some(state) = &mut self.state {
+            if window_id == state.window.id()
+                && !(state.ui_visible && state.ui_renderer.on_event(&state.window, &event))
+            {
+                match event {
+                    WindowEvent::Resized(physical_size) => {
+                        state.resize(physical_size, None);
                     }
-                }
-            }
-            WindowEvent::MouseWheel { delta, .. } => match delta {
-                winit::event::MouseScrollDelta::LineDelta(_, dy) => {
-                    state.controller.process_scroll(*dy )
-                }
-                winit::event::MouseScrollDelta::PixelDelta(p) => {
-                    state.controller.process_scroll(p.y as f32 / 100.)
-                }
-            },
-            WindowEvent::Touch(touch)=>{
-                match  touch.phase{
-                    winit::event::TouchPhase::Started=>{
-                        state.controller.left_mouse_pressed = true;
-                        last_touch_position = Vector2::new(touch.location.x, touch.location.y);
+                    WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                        state.scale_factor = scale_factor as f32;
                     }
-                    winit::event::TouchPhase::Ended=>{
-                        state.controller.left_mouse_pressed = false;
+                    WindowEvent::CloseRequested => event_loop.exit(),
+                    WindowEvent::ModifiersChanged(m) => {
+                        state.controller.alt_pressed = m.state().alt_key();
                     }
-                    winit::event::TouchPhase::Moved=>{
-                        state.controller.process_mouse((touch.location.x-last_touch_position.x) as f32, (touch.location.y-last_touch_position.y) as f32);
-                        last_touch_position = Vector2::new(touch.location.x, touch.location.y);
+                    WindowEvent::KeyboardInput { event, .. } => {
+                        if let PhysicalKey::Code(key) = event.physical_key {
+                            state
+                                .controller
+                                .process_keyboard(key, event.state == ElementState::Pressed);
+                            if key == KeyCode::KeyU && event.state == ElementState::Released {
+                                state.ui_visible = !state.ui_visible;
+                            }
+                        }
                     }
-                    _=>{}
-                    
-                }
-            }
-            WindowEvent::MouseInput { state:button_state, button, .. }=>{
-                match button {
-                    winit::event::MouseButton::Left =>                         state.controller.left_mouse_pressed = *button_state == ElementState::Pressed,
-                    winit::event::MouseButton::Right => state.controller.right_mouse_pressed = *button_state == ElementState::Pressed,
-                    _=>{}
-                }
-            },
-            WindowEvent::DroppedFile(file) => {
-                if let Err(e) = state.load_file(file){
-                    log::error!("failed to load file: {:?}", e)
-                }
-            }
-            WindowEvent::RedrawRequested => {
-                let now = Instant::now();
-                let dt = now-last;
-                last = now;
-                state.update(dt);
-    
-                match state.render() {
-                    Ok(_) => {}
-                    // Reconfigure the surface if lost
-                    Err(wgpu::SurfaceError::Lost) =>{
-                        log::error!("lost surface!");
-                         state.resize(state.window.inner_size(), None)
+                    WindowEvent::MouseWheel { delta, .. } => match delta {
+                        winit::event::MouseScrollDelta::LineDelta(_, dy) => {
+                            state.controller.process_scroll(dy)
+                        }
+                        winit::event::MouseScrollDelta::PixelDelta(p) => {
+                            state.controller.process_scroll(p.y as f32 / 100.)
+                        }
+                    },
+                    WindowEvent::Touch(touch) => match touch.phase {
+                        winit::event::TouchPhase::Started => {
+                            state.controller.left_mouse_pressed = true;
+                            self.last_touch_position =
+                                Vector2::new(touch.location.x, touch.location.y);
+                        }
+                        winit::event::TouchPhase::Ended => {
+                            state.controller.left_mouse_pressed = false;
+                        }
+                        winit::event::TouchPhase::Moved => {
+                            state.controller.process_mouse(
+                                (touch.location.x - self.last_touch_position.x) as f32,
+                                (touch.location.y - self.last_touch_position.y) as f32,
+                            );
+                            self.last_touch_position =
+                                Vector2::new(touch.location.x, touch.location.y);
+                        }
+                        _ => {}
+                    },
+                    WindowEvent::MouseInput {
+                        state: button_state,
+                        button,
+                        ..
+                    } => match button {
+                        winit::event::MouseButton::Left => {
+                            state.controller.left_mouse_pressed =
+                                button_state == ElementState::Pressed
+                        }
+                        winit::event::MouseButton::Right => {
+                            state.controller.right_mouse_pressed =
+                                button_state == ElementState::Pressed
+                        }
+                        _ => {}
+                    },
+                    WindowEvent::DroppedFile(file) => {
+                        if let Err(e) = state.load_file(&file) {
+                            log::error!("failed to load file: {:?}", e)
+                        }
+                    }
+                    WindowEvent::RedrawRequested => {
+                        let now = Instant::now();
+                        let dt = now - self.last_draw;
+                        self.last_draw = now;
+                        state.update(dt);
 
-                        },
-                    // The system is out of memory, we should probably quit
-                    Err(wgpu::SurfaceError::OutOfMemory) =>target.exit(),
-                    // All other errors (Outdated, Timeout) should be resolved by the next frame
-                    Err(e) => println!("error: {:?}", e),
+                        match state.render() {
+                            Ok(_) => {}
+                            // Reconfigure the surface if lost
+                            Err(wgpu::SurfaceError::Lost) => {
+                                log::error!("lost surface!");
+                                state.resize(state.window.inner_size(), None)
+                            }
+                            // The system is out of memory, we should probably quit
+                            Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
+                            // All other errors (Outdated, Timeout) should be resolved by the next frame
+                            Err(e) => println!("error: {:?}", e),
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        log::info!("exit!");
+    }
+
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: winit::event::StartCause) {
+        match cause {
+            winit::event::StartCause::ResumeTimeReached { .. } => {
+                if let Some(state) = &self.state {
+                    state.window.request_redraw();
                 }
             }
             _ => {}
-        },
-        Event::DeviceEvent {
-            event: DeviceEvent::MouseMotion{ delta, },
-            .. // We're not using device_id currently
-        } => {
-            state.controller.process_mouse(delta.0 as f32, delta.1 as f32)
         }
-        
-        Event::AboutToWait => {
-            #[cfg(target_arch = "wasm32")]
-            use winit::platform::web::WindowExtWebSys;
-            #[cfg(target_arch = "wasm32")]
-            if let Some(canvas) = state.window.canvas() {
-                if canvas.parent_node().is_none() {
-                    // The canvas has been removed from the DOM, we should exit
-                    target.exit();
-                    return;
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
+        event: DeviceEvent,
+    ) {
+        match event {
+            DeviceEvent::MouseMotion { delta, .. } => {
+                if let Some(state) = &mut self.state {
+                    state
+                        .controller
+                        .process_mouse(delta.0 as f32, delta.1 as f32)
                 }
             }
+            _ => {}
+        }
+    }
 
-            // RedrawRequested will only trigger once, unless we manually
-            // request it.
+    fn about_to_wait(&mut self, #[allow(unused_variables)] event_loop: &ActiveEventLoop) {
+        if let Some(state) = &self.state {
             state.window.request_redraw();
         }
-        _ => {},
-    }).unwrap();
-    log::info!("exit!");
+        #[cfg(target_arch = "wasm32")]
+        use winit::platform::web::WindowExtWebSys;
+        #[cfg(target_arch = "wasm32")]
+        if let Some(Some(canvas)) = self.state.as_ref().map(|s| s.window.canvas()) {
+            if canvas.parent_node().is_none() {
+                // The canvas has been removed from the DOM, we should exit
+                event_loop.exit();
+                return;
+            }
+        }
+    }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, window_context: WindowContext) {
+        // window was created and is ready to be used
+        // we have to this workaround for wasm because we can't create the window in the main thread as it is async
+        self.state = Some(window_context);
+    }
+}
+
+pub async fn open_window(
+    volumes: Vec<Volume>,
+    cmap: LinearSegmentedColorMap,
+    config: RenderConfig,
+    #[cfg(target_arch = "wasm32")]
+    canvas_id: String,
+) {
+    let event_loop: EventLoop<WindowContext> = EventLoop::with_user_event().build().unwrap();
+    let mut app = App::new(event_loop.create_proxy(), volumes,cmap, config, #[cfg(target_arch = "wasm32")]canvas_id);
+    event_loop.run_app(&mut app).unwrap();
 }

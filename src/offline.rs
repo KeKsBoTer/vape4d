@@ -55,7 +55,7 @@ async fn render_view<P: Projection>(
             depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
-        });
+        }).forget_lifetime();
         renderer.render(&mut render_pass, &frame_data);
     }
     queue.submit(std::iter::once(encoder.finish()));
