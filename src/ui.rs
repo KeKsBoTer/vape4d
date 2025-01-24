@@ -1,16 +1,17 @@
 use std::{f32::consts::PI, ops::RangeInclusive, time::Duration};
 
 use egui::{emath::Numeric, epaint::TextShape, vec2};
-use egui_plot::{Plot, PlotImage, PlotPoint};
+use egui_plot::{Bar, BarChart, Legend, Plot, PlotImage, PlotPoint};
 
 use crate::{
     cmap::{ColorMap, COLORMAP_RESOLUTION},
+    volume::Volume,
     WindowContext,
 };
 
 use crate::cmap::COLORMAPS;
 
-pub(crate) fn ui(state: &mut WindowContext) -> bool{
+pub(crate) fn ui(state: &mut WindowContext) -> bool {
     let ctx = state.ui_renderer.winit.egui_ctx();
     let with_animation = state.volume.volume.timesteps() > 1;
     egui::Window::new("Render Settings").show(ctx, |ui| {
@@ -22,7 +23,8 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool{
                     ui.label("Time");
                     ui.add(
                         egui::Slider::new(&mut state.render_settings.time, (0.)..=(1.))
-                            .clamping(SliderClamping::Always).custom_formatter(|v,_|((v*100.).round()/100.).to_string()) // fixed_decimals(2) modifies the value so do not use it here
+                            .clamping(SliderClamping::Always)
+                            .custom_formatter(|v, _| ((v * 100.).round() / 100.).to_string()), // fixed_decimals(2) modifies the value so do not use it here
                     );
                     if ui.button(if state.playing { "||" } else { "▶" }).clicked() {
                         state.playing = !state.playing;
@@ -52,15 +54,32 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool{
                 );
                 ui.end_row();
 
-
                 ui.label("Axis Scale");
-                ui.horizontal(|ui|{
-                    ui.add(egui::DragValue::new(&mut state.render_settings.axis_scale.x).speed(0.01).range(RangeInclusive::new(1., 1e2)).clamp_existing_to_range(true).suffix("x"));
-                    ui.add(egui::DragValue::new(&mut state.render_settings.axis_scale.y).speed(0.01).range(RangeInclusive::new(1., 1e2)).clamp_existing_to_range(true).suffix("y"));
-                    ui.add(egui::DragValue::new(&mut state.render_settings.axis_scale.z).speed(0.01).range(RangeInclusive::new(1., 1e2)).clamp_existing_to_range(true).suffix("z"));
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut state.render_settings.axis_scale.x)
+                            .speed(0.01)
+                            .range(RangeInclusive::new(1., 1e2))
+                            .clamp_existing_to_range(true)
+                            .suffix("x"),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut state.render_settings.axis_scale.y)
+                            .speed(0.01)
+                            .range(RangeInclusive::new(1., 1e2))
+                            .clamp_existing_to_range(true)
+                            .suffix("y"),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut state.render_settings.axis_scale.z)
+                            .speed(0.01)
+                            .range(RangeInclusive::new(1., 1e2))
+                            .clamp_existing_to_range(true)
+                            .suffix("z"),
+                    );
                 });
                 ui.end_row();
-                
+
                 ui.label("Distance Scale");
                 ui.add(
                     egui::DragValue::new(&mut state.render_settings.distance_scale)
@@ -366,6 +385,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool{
                     ));
                     ui.end_row();
                 });
+            histograms(ui, "histograms".into(), &state.volume.volume);
         });
     }
 
@@ -421,8 +441,8 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool{
                 ));
             }
         });
-        let repaint = ctx.has_requested_repaint();
-        return repaint;
+    let repaint = ctx.has_requested_repaint();
+    return repaint;
 }
 
 pub fn argsort<T: PartialOrd>(data: &[T]) -> Vec<usize> {
@@ -600,6 +620,29 @@ fn show_cmap(ui: &mut egui::Ui, id: egui::Id, cmap: impl ColorMap + Hash, vmin: 
         .allow_zoom(false);
     plot.show(ui, |plot_ui| {
         plot_ui.image(image);
+    });
+}
+
+fn histograms(ui: &mut Ui, id: egui::Id, volume: &Volume) {
+    let plot = Plot::new(id).legend(Legend::default());
+    plot.show(ui, |plot_ui| {
+        for c in 0..volume.channels() {
+            let vmin = volume.min_value as f64;
+            let vmax = volume.max_value as f64;
+            let hist = volume.get_histogram(c);
+            let bar_width = (vmax - vmin) / hist.len() as f64;
+            let bars = hist
+                .iter()
+                .enumerate()
+                .map(|(i, v)| {
+                    Bar::new(
+                        i as f64 / hist.len() as f64 * (vmax - vmin) + vmin,
+                        *v as f64,
+                    )
+                })
+                .collect();
+            plot_ui.bar_chart(BarChart::new(bars).name(format!("Channel {}", c)).width(bar_width));
+        }
     });
 }
 

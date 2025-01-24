@@ -29,7 +29,7 @@ fn vape4d<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
         vmax: Option<f32>,
         spatial_interpolation: Option<String>,
         temporal_interpolation: Option<String>,
-        axis_scale:Option<(f32,f32,f32)>,
+        axis_scale: Option<(f32, f32, f32)>,
     ) -> Bound<'py, PyArray4<u8>> {
         let volume = Volume::from_array(volume.as_array());
         let cmap = ListedColorMap::from_array(cmap.as_array());
@@ -53,7 +53,7 @@ fn vape4d<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
             temporal_interpolation
                 .map(|s| parse_interpolation(&s).unwrap())
                 .unwrap_or_default(),
-            axis_scale.map(|(x,y,z)| Vector3::new(x,y,z)),
+            axis_scale.map(|(x, y, z)| Vector3::new(x, y, z)),
         ))
         .unwrap();
 

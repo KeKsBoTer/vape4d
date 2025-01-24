@@ -77,7 +77,7 @@ pub async fn render_volume(
     distance_scale: f32,
     spatial_interpolation: wgpu::FilterMode,
     temporal_interpolation: wgpu::FilterMode,
-    axis_scale: Option<Vector3<f32>>,   
+    axis_scale: Option<Vector3<f32>>,
 ) -> anyhow::Result<Vec<ImageBuffer<Rgba<u8>, Vec<u8>>>> {
     env_logger::init();
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {

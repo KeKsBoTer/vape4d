@@ -84,7 +84,7 @@ impl InlineViewerConfig {
             duration,
             axis_scale_x,
             axis_scale_y,
-            axis_scale_z
+            axis_scale_z,
         }
     }
 }

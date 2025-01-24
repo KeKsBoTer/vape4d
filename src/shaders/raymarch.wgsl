@@ -14,10 +14,12 @@ struct CameraUniforms {
 struct Settings {
     volume_aabb: Aabb,
     clipping: Aabb,
+
     time: f32,
-    time_steps: u32,
     step_size: f32,
     temporal_filter: u32,
+    spatial_filter: u32,
+    
     distance_scale: f32,
     vmin: f32,
     vmax: f32,
@@ -105,15 +107,12 @@ fn vs_main(
 }
 
 // performs a step and returns the NDC cooidinate for the volume sampling
-fn next_pos(pos: ptr<function,vec3<f32>>, step_size: f32, ray_dir: vec3<f32>) -> vec4<f32> {
+fn next_pos(pos: ptr<function,vec3<f32>>, step_size: f32, ray_dir: vec3<f32>) -> vec3<f32> {
     let aabb = settings.volume_aabb;
     let aabb_size = aabb.max - aabb.min;
     let sample_pos = ((*pos) - aabb.min) / aabb_size;
     *pos += ray_dir * step_size;
-    return vec4<f32>(
-        sample_pos,
-        step_size,
-    );
+    return sample_pos;
 }
 
 fn sample_volume(pos: vec3<f32>) -> f32 {
@@ -124,8 +123,7 @@ fn sample_volume(pos: vec3<f32>) -> f32 {
     if settings.temporal_filter == FILTER_NEAREST {
         return sample_curr;
     } else {
-        let time_fraction = fract(settings.time * f32(settings.time_steps - (1)));
-        return mix(sample_curr, sample_next, time_fraction);
+        return mix(sample_curr, sample_next, settings.time);
     }
 }
 
@@ -134,9 +132,112 @@ fn sample_cmap(value: f32) -> vec4<f32> {
     return textureSampleLevel(cmap, cmap_sampler, vec2<f32>(value_n, 0.5), 0.);
 }
 
+/// random float between 0 and 1
+fn rand(co:vec2<f32> ) -> f32{
+    return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+
+struct DDAState {
+    t_max: vec3<f32>,
+    t_delta: vec3<f32>,
+    step: vec3<i32>,
+    voxel_index: vec3<i32>,
+    step_dir_curr: vec3<i32>,
+}
+
+fn get_voxel_segment_length(ray_origin: vec3<f32>, ray_direction: vec3<f32>, voxel_index: vec3<i32>) -> f32 {
+    let lower = vec3<f32>(voxel_index);
+    let upper = vec3<f32>(voxel_index + 1);
+    var t_near = -1e7;
+    var t_far = 1e7;
+    for (var i: i32 = 0; i < 3; i += 1) {
+        if abs(ray_direction[i]) < 1e-4 {
+            if ray_origin[i] < lower[i] || ray_origin[i] > upper[i] {
+                return 0.0;
+            }
+        } else {
+            var t0 = (lower[i] - ray_origin[i]) / ray_direction[i];
+            var t1 = (upper[i] - ray_origin[i]) / ray_direction[i];
+            if (t0 > t1) {
+                let tmp = t0;
+                t0 = t1;
+                t1 = tmp;
+            }
+            if t0 > t_near {
+                t_near = t0;
+            }
+            if t1 < t_far {
+                t_far = t1;
+            }
+            if t_near > t_far || t_far < 0 {
+                return 0.0;
+            }
+        }
+    }
+    return t_far - t_near;
+}
+
+fn next_pos_dda(
+        pos: ptr<function,vec3<f32>>, step_size: ptr<function,f32>, ray_orig: vec3<f32>, ray_dir: vec3<f32>,
+        state: ptr<function,DDAState>) -> vec3<f32> {
+    let aabb = settings.volume_aabb;
+    let aabb_size = aabb.max - aabb.min;
+
+    let sample_pos = (vec3<f32>((*state).voxel_index) + 0.5) / vec3<f32>(textureDimensions(volume));
+
+    *step_size = get_voxel_segment_length(ray_orig, ray_dir, (*state).voxel_index) / f32(textureDimensions(volume).x) * aabb_size.x;
+
+    if ((*state).t_max.x < (*state).t_max.y) {
+        if ((*state).t_max.x < (*state).t_max.z) {
+            (*state).voxel_index.x += (*state).step.x;
+            (*state).t_max.x += (*state).t_delta.x;
+            (*state).step_dir_curr = vec3<i32>((*state).step.x, 0, 0);
+          } else {
+            (*state).voxel_index.z += (*state).step.z;
+            (*state).t_max.z += (*state).t_delta.z;
+            (*state).step_dir_curr = vec3<i32>(0, 0, (*state).step.z);
+        }
+    } else {
+        if ((*state).t_max.y < (*state).t_max.z) {
+            (*state).voxel_index.y += (*state).step.y;
+            (*state).t_max.y += (*state).t_delta.y;
+            (*state).step_dir_curr = vec3<i32>(0, (*state).step.y, 0);
+        } else {
+            (*state).voxel_index.z += (*state).step.z;
+            (*state).t_max.z += (*state).t_delta.z;
+            (*state).step_dir_curr = vec3<i32>(0, 0, (*state).step.z);
+        }
+    }
+
+    *pos += ray_dir * (*step_size);
+
+    return sample_pos;
+}
+
+fn intersect_aabb_dir(ray_origin: vec3<f32>, ray_direction: vec3<f32>, lower: vec3<f32>, upper: vec3<f32>) -> i32 {
+    var dir = 0;
+    var t_near_best = -1e7;
+    for (var i: i32 = 0; i < 3; i += 1) {
+        var t0 = (lower[i] - ray_origin[i]) / ray_direction[i];
+        var t1 = (upper[i] - ray_origin[i]) / ray_direction[i];
+        if (t0 > t1) {
+            let tmp = t0;
+            t0 = t1;
+            t1 = tmp;
+        }
+        let t_near = t0;
+        if t_near > t_near_best {
+            t_near_best = t_near;
+            dir = i;
+        }
+    }
+    return dir;
+}
 
 // traces ray trough volume and returns color
-fn trace_ray(ray_in: Ray) -> vec4<f32> {
+fn trace_ray(ray_in: Ray,pixel_pos:vec2<f32>) -> vec4<f32> {
+    
     let aabb = settings.volume_aabb;
     let aabb_size = aabb.max - aabb.min;
     var ray = ray_in;
@@ -151,6 +252,7 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
         return vec4<f32>(0.);
     }
 
+    let start_cam_pos = ray.orig;
     let start = max(0., intersec.x) + 1e-4;
     ray.orig += start * ray.dir;
 
@@ -165,11 +267,50 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
     var pos = ray.orig;
 
     let early_stopping_t = 1. / 255.;
-    let step_size_g = settings.step_size;
-    var sample_pos: vec4<f32>;
+
+    var state: DDAState;
+    let step_size_g = (settings.step_size) ;//+ (100.*settings.step_size) * rand(pixel_pos);
+    var sample_pos: vec3<f32>;
+    var start_point: vec3<f32>;
+
+    if settings.spatial_filter == FILTER_NEAREST  {
+        start_point = (ray.orig - aabb.min) / aabb_size * vec3<f32>(volume_size);
+        let end_point = (start_cam_pos + (intersec.y - 1e-4) * ray.dir - aabb.min) / aabb_size * vec3<f32>(volume_size);
+
+        for (var i: i32 = 0; i < 3; i += 1) {
+            state.step[i] = i32(sign(end_point[i] - start_point[i]));
+            if state.step[i] != 0 {
+                state.t_delta[i] = min(f32(state.step[i]) / (end_point[i] - start_point[i]), 1e7);
+            } else {
+                state.t_delta[i] = 1e7; // inf
+            }
+            if state.step[i] > 0 {
+                state.t_max[i] = state.t_delta[i] * (1.0 - fract(start_point[i]));
+            } else {
+                state.t_max[i] = state.t_delta[i] * fract(start_point[i]);
+            }
+            state.voxel_index[i] = i32(floor(start_point[i]));
+        }
+
+        state.step_dir_curr = vec3<i32>(0, 0, 0);
+        let dir_init = intersect_aabb_dir(start_point, ray.dir, aabb_min, aabb_max);
+        state.step_dir_curr[dir_init] = state.step[dir_init];
+    }
+
+
+    var step_size: f32;
     loop{
-        sample_pos = next_pos(&pos, step_size_g, ray.dir);
-        let step_size = sample_pos.w;
+        if settings.spatial_filter == FILTER_NEAREST {
+            sample_pos = next_pos_dda(&pos, &step_size, start_point, ray.dir, &state);
+        } else {
+            step_size = step_size_g;
+            sample_pos = next_pos(&pos, step_size_g, ray.dir);
+        }
+
+        let slice_test = any(sample_pos < slice_min) || any(sample_pos > slice_max) ;
+        if slice_test || iters > 10000 {
+            break;
+        }
 
         let sample = sample_volume(sample_pos.xyz);
         let color_tf = sample_cmap(sample);
@@ -182,15 +323,9 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
             color += transmittance * a_i * sample_color;
             transmittance *= 1. - a_i;
 
-            if exp(-transmittance) <= early_stopping_t {
+            if transmittance <= early_stopping_t {
                 break;
             }
-        }
-        // check if within slice
-        let slice_test = any(sample_pos.xyz < settings.clipping.min) || any(sample_pos.xyz > settings.clipping.max) ;
-
-        if slice_test || iters > 10000 {
-            break;
         }
         iters += 1u;
     }
@@ -206,7 +341,7 @@ fn gamma_correction(color: vec4<f32>) -> vec4<f32> {
 fn fs_main(vertex_in: VertexOut) -> @location(0) vec4<f32> {
     let r_pos = vec2<f32>(vertex_in.tex_coord.x, 1. - vertex_in.tex_coord.y);
     let ray = create_ray(camera.view_inv, camera.proj_inv, r_pos);
-    var color = trace_ray(ray);
+    var color = trace_ray(ray,r_pos);
     if settings.gamma_correction == 1u {
         color = fromLinear(color);
     }

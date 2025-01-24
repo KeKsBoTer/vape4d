@@ -13,6 +13,7 @@ use std::io::{Read, Seek};
 use std::time::Instant;
 use wgpu::util::{DeviceExt, TextureDataOrder};
 
+const HISTOGRAM_BINS: usize = 128;
 #[derive(Clone)]
 pub struct Volume {
     pub aabb: Aabb<f32>,
@@ -20,6 +21,9 @@ pub struct Volume {
     pub max_value: f32,
     /// array of shape [channels, timesteps, z, y, x]
     data: Array5<f16>,
+
+    /// one histogram per channel
+    histograms: Vec<[f32; HISTOGRAM_BINS]>,
 }
 
 impl Volume {
@@ -29,11 +33,10 @@ impl Volume {
 
         let shape = arr.shape().to_vec();
 
-        let arr = match  shape.len() {
+        let arr = match shape.len() {
             3 => arr.insert_axis(Axis(0)).insert_axis(Axis(0)),
             4 => arr.insert_axis(Axis(0)),
             _ => arr,
-            
         };
         let data: Array5<f16> = arr.into_dimensionality::<Ix5>().unwrap().into_owned();
         let shape = data.shape().to_vec();
@@ -58,7 +61,6 @@ impl Volume {
         if min_value >= max_value {
             max_value = min_value + f16::one();
         }
-
 
         Self {
             aabb,
@@ -87,9 +89,9 @@ impl Volume {
     /// returns width, height, depth
     pub fn size(&self) -> Vector3<u32> {
         Vector3 {
-            x: self.data.shape()[4] as u32,
-            y: self.data.shape()[3] as u32,
-            z: self.data.shape()[2] as u32,
+            x: self.data.shape()[4] as u32, // width
+            y: self.data.shape()[3] as u32, // height
+            z: self.data.shape()[2] as u32, // depth
         }
     }
 
@@ -137,14 +139,26 @@ impl Volume {
             arr.swap_axes(0, 1);
         }
 
+        let channels = arr.shape()[0];
+        let mut histograms = vec![[0f32; HISTOGRAM_BINS]; channels];
+        let numel: usize = arr.shape().iter().skip(1).product();
+        for (c, channel_data) in arr.axis_iter(Axis(0)).enumerate() {
+            for &value in channel_data.iter() {
+                let bin = ((value.to_f32() - min_value.to_f32()) / (max_value - min_value).to_f32()
+                    * (HISTOGRAM_BINS - 1) as f32)
+                    .floor() as usize;
+                histograms[c][bin] += 1. / numel as f32;
+            }
+        }
+
         let res_min = shape.iter().skip(2).min().unwrap();
 
         let aabb = Aabb {
             min: Point3::new(0.0, 0.0, 0.0),
             max: Point3::new(
-                shape[2] as f32 / *res_min as f32,
-                shape[3] as f32 / *res_min as f32,
                 shape[4] as f32 / *res_min as f32,
+                shape[3] as f32 / *res_min as f32,
+                shape[2] as f32 / *res_min as f32,
             ),
         };
         log::info!("read volume in {:?}", start.elapsed());
@@ -154,6 +168,7 @@ impl Volume {
             min_value: min_value.to_f32(),
             max_value: max_value.to_f32(),
             data: arr,
+            histograms,
         })
     }
 
@@ -167,17 +182,17 @@ impl Volume {
                     2 => Self::read_dyn::<_, f16>(array, time_first),
                     4 => Self::read_dyn::<_, f32>(array, time_first),
                     8 => Self::read_dyn::<_, f64>(array, time_first),
-                    _ => anyhow::bail!("unsupported type {:}", d),
+                    _ => anyhow::bail!("unsupported float type {:}", d),
                 },
                 npyz::TypeChar::Uint => match d.num_bytes().unwrap() {
                     1 => Self::read_dyn::<_, u8>(array, time_first),
                     2 => Self::read_dyn::<_, u16>(array, time_first),
-                    _ => anyhow::bail!("unsupported type {:}", d),
+                    _ => anyhow::bail!("unsupported unsigned type {:}", d),
                 },
                 npyz::TypeChar::Int => match d.num_bytes().unwrap() {
                     1 => Self::read_dyn::<_, i8>(array, time_first),
                     2 => Self::read_dyn::<_, i16>(array, time_first),
-                    _ => anyhow::bail!("unsupported type {:}", d),
+                    _ => anyhow::bail!("unsupported signed type {:?}", d),
                 },
                 _ => anyhow::bail!("unsupported type {:}", d),
             },
@@ -212,6 +227,10 @@ impl Volume {
             .to_string();
         let array = reader.by_name(arr_name.as_str())?.unwrap();
         Self::read(array, time_first)
+    }
+
+    pub fn get_histogram(&self, c: usize) -> &[f32; HISTOGRAM_BINS] {
+        &self.histograms[c]
     }
 }
 

@@ -3,10 +3,10 @@ use cmap::LinearSegmentedColorMap;
 use controller::CameraController;
 use egui::FullOutput;
 use renderer::{RenderSettings, VolumeRenderer};
-#[cfg(target_arch = "wasm32")]
-use web_sys::HtmlCanvasElement;
 use std::{path::PathBuf, sync::Arc};
 use volume::VolumeGPU;
+#[cfg(target_arch = "wasm32")]
+use web_sys::HtmlCanvasElement;
 
 #[cfg(target_arch = "wasm32")]
 use instant::{Duration, Instant};
@@ -20,7 +20,12 @@ pub use web::*;
 
 use cgmath::{Vector2, Vector3, Zero};
 use winit::{
-    application::ApplicationHandler, dpi::{LogicalSize, PhysicalSize}, event::{DeviceEvent, ElementState, WindowEvent}, event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowAttributes}
+    application::ApplicationHandler,
+    dpi::{LogicalSize, PhysicalSize},
+    event::{DeviceEvent, ElementState, WindowEvent},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
+    keyboard::{KeyCode, PhysicalKey},
+    window::{Window, WindowAttributes},
 };
 
 use crate::{
@@ -158,7 +163,7 @@ impl WindowContext {
             #[cfg(target_arch = "wasm32")]
             {
                 use winit::platform::web::WindowExtWebSys;
-                if let Some(canvas) = window.canvas(){
+                if let Some(canvas) = window.canvas() {
                     size = PhysicalSize::new(canvas.width(), canvas.height());
                 }
             };
@@ -221,7 +226,6 @@ impl WindowContext {
             vmax: render_config.vmax,
             gamma_correction: !surface_format.is_srgb(),
             axis_scale: Vector3::new(1., 1., 1.),
-
         };
 
         let mut controller = CameraController::new(0.1, 0.05);
@@ -273,7 +277,8 @@ impl WindowContext {
     fn load_file(&mut self, path: &PathBuf) -> anyhow::Result<()> {
         let reader = std::fs::File::open(path)?;
         let volume = Volume::load_numpy(reader, true)?;
-        let volume_gpu = VolumeGPU::new(&self.wgpu_context.device, &self.wgpu_context.queue, volume);
+        let volume_gpu =
+            VolumeGPU::new(&self.wgpu_context.device, &self.wgpu_context.queue, volume);
         self.volume = volume_gpu;
         // self.controller.center = volume.aabb.center();
         self.camera
@@ -305,14 +310,14 @@ impl WindowContext {
         self.controller.update_camera(&mut self.camera, dt);
         if self.camera != old_camera {
             requires_redraw = true;
-        }   
+        }
 
         if self.playing && self.volume.volume.timesteps() > 1 {
             self.render_settings.time += dt.as_secs_f32() / self.animation_duration.as_secs_f32();
             self.render_settings.time = self.render_settings.time.fract();
 
             requires_redraw = true;
-        } 
+        }
         return requires_redraw;
     }
 
@@ -325,7 +330,6 @@ impl WindowContext {
 
         return (request_redraw, shapes);
     }
-
 
     fn render(&mut self, shapes: Option<FullOutput>) -> Result<(), wgpu::SurfaceError> {
         let window_size = self.window.inner_size();
@@ -376,7 +380,7 @@ impl WindowContext {
                 &camera,
                 &self.render_settings,
                 &self.cmap_gpu,
-                selected_channel
+                selected_channel,
             ));
         } else {
             for channel in 0..self.volume.volume.channels() {
@@ -390,7 +394,7 @@ impl WindowContext {
                     &camera,
                     &self.render_settings,
                     &self.cmap_gpu,
-                    channel
+                    channel,
                 ));
             }
         }
@@ -503,10 +507,12 @@ impl ApplicationHandler<WindowContext> for App {
                 let window = web_sys::window().unwrap();
                 let document = window.document().unwrap();
                 let canvas = document.get_element_by_id(&self.canvas_id).unwrap();
-                let html_canvas_element:HtmlCanvasElement = canvas.unchecked_into();
+                let html_canvas_element: HtmlCanvasElement = canvas.unchecked_into();
                 let width = html_canvas_element.client_width() as u32;
                 let height = html_canvas_element.client_height() as u32;
-                window_attributes = window_attributes.with_canvas(Some(html_canvas_element)).with_inner_size(winit::dpi::Size::Physical(PhysicalSize::new(width, height)));
+                window_attributes = window_attributes
+                    .with_canvas(Some(html_canvas_element))
+                    .with_inner_size(winit::dpi::Size::Physical(PhysicalSize::new(width, height)));
             }
 
             let window = event_loop.create_window(window_attributes).unwrap();
@@ -518,7 +524,6 @@ impl ApplicationHandler<WindowContext> for App {
                     self.volume.clone(),
                     self.cmap.clone(),
                     self.config.clone(),
-
                 );
                 wasm_bindgen_futures::spawn_local(async move {
                     let gfx = window_context.await.unwrap();
@@ -622,14 +627,13 @@ impl ApplicationHandler<WindowContext> for App {
                         if !self.config.no_vsync {
                             // make sure the next redraw is called with a small delay
                             event_loop.set_control_flow(ControlFlow::wait_duration(
-                                Duration::from_millis(1000/60)
+                                Duration::from_millis(1000 / 60),
                             ));
                         }
                         let now = Instant::now();
                         let dt = now - self.last_draw;
                         self.last_draw = now;
                         let request_redraw = state.update(dt);
-
 
                         let (redraw_ui, ui_shapes) = state.ui();
 

@@ -89,7 +89,7 @@ impl VolumeRenderer {
         camera: &Camera<P>,
         render_settings: &RenderSettings,
         cmap: &'a ColorMapGPU,
-        channel:usize
+        channel: usize,
     ) -> PerFrameData<'a> {
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("camera buffer"),
@@ -114,13 +114,16 @@ impl VolumeRenderer {
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: wgpu::BindingResource::TextureView(
-                        &volume.get_texture(channel, step).create_view(&wgpu::TextureViewDescriptor::default()),
+                        &volume
+                            .get_texture(channel, step)
+                            .create_view(&wgpu::TextureViewDescriptor::default()),
                     ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::TextureView(
-                        &volume.get_texture(channel,(step + 1) % volume.volume.timesteps() as usize)
+                        &volume
+                            .get_texture(channel, (step + 1) % volume.volume.timesteps() as usize)
                             .create_view(&wgpu::TextureViewDescriptor::default()),
                     ),
                 },
@@ -287,7 +290,7 @@ pub struct RenderSettings {
     pub vmin: Option<f32>,
     pub vmax: Option<f32>,
     pub gamma_correction: bool,
-    pub axis_scale:Vector3<f32>
+    pub axis_scale: Vector3<f32>,
 }
 
 impl Default for RenderSettings {
@@ -302,7 +305,7 @@ impl Default for RenderSettings {
             vmin: None,
             vmax: None,
             gamma_correction: false,
-            axis_scale:Vector3::new(1.0,1.0,1.0)
+            axis_scale: Vector3::new(1.0, 1.0, 1.0),
         }
     }
 }
@@ -314,10 +317,12 @@ pub struct RenderSettingsUniform {
     volume_aabb_max: Vector4<f32>,
     clipping_min: Vector4<f32>,
     clipping_max: Vector4<f32>,
+    
     time: f32,
-    time_steps: u32,
     step_size: f32,
     temporal_filter: u32,
+    spatial_filter: u32,
+
     distance_scale: f32,
     vmin: f32,
     vmax: f32,
@@ -335,7 +340,6 @@ impl RenderSettingsUniform {
             volume_aabb_min: aabb_min.to_vec().extend(0.),
             volume_aabb_max: aabb_max.to_vec().extend(0.),
             time: settings.time,
-            time_steps: volume.timesteps() as u32,
             clipping_min: settings
                 .clipping_aabb
                 .map(|bb| bb.min.to_vec().extend(0.))
@@ -346,6 +350,7 @@ impl RenderSettingsUniform {
                 .unwrap_or(RenderSettingsUniform::default().clipping_max),
             step_size: settings.step_size,
             temporal_filter: settings.temporal_filter as u32,
+            spatial_filter: settings.spatial_filter as u32,
             distance_scale: settings.distance_scale,
             vmin: settings.vmin.unwrap_or(volume.min_value),
             vmax: settings.vmax.unwrap_or(volume.max_value),
@@ -362,9 +367,9 @@ impl Default for RenderSettingsUniform {
             clipping_min: Vector4::zero(),
             clipping_max: Vector4::new(1., 1., 1., 0.),
             time: 0.,
-            time_steps: 1,
             step_size: 0.01,
-            temporal_filter: wgpu::FilterMode::Nearest as u32,
+            temporal_filter: wgpu::FilterMode::Linear as u32,
+            spatial_filter: wgpu::FilterMode::Linear as u32,
             distance_scale: 1.,
             vmin: 0.,
             vmax: 1.,

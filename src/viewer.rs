@@ -31,7 +31,7 @@ where
 
     let data_file = File::open(&opt.input)?;
 
-    let volume= Volume::load_numpy(BufReader::new(data_file), !opt.channel_first)
+    let volume = Volume::load_numpy(BufReader::new(data_file), !opt.channel_first)
         .expect("Failed to load volume");
 
     let cmap = opt
