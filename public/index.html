@@ -105,6 +105,11 @@
         #error-message {
             color: red;
         }
+
+        #window-canvas{
+            width: 100% !important;
+            height: 100% !important;
+        }
     </style>
 
 </head>
@@ -161,6 +166,9 @@
                             settings["vmax"],
                             settings["distance_scale"],
                             settings["duration"],
+                            settings["axis_scale"][0],
+                            settings["axis_scale"][1],
+                            settings["axis_scale"][2],
                         )
                     );
                     window.removeEventListener("message", this)

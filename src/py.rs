@@ -31,7 +31,7 @@ fn vape4d<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
         temporal_interpolation: Option<String>,
         axis_scale: Option<(f32, f32, f32)>,
     ) -> Bound<'py, PyArray4<u8>> {
-        let volume = Volume::from_array(volume.as_array());
+        let volume = Volume::from_array(volume.as_array()).unwrap();
         let cmap = ListedColorMap::from_array(cmap.as_array());
         let img: Vec<ImageBuffer<Rgba<u8>, Vec<u8>>> = pollster::block_on(render_volume(
             vec![volume],

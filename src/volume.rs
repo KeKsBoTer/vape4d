@@ -2,12 +2,10 @@ use bytemuck::Zeroable;
 use cgmath::{BaseNum, EuclideanSpace, MetricSpace, One, Point3, Vector3};
 use half::f16;
 #[cfg(target_arch = "wasm32")]
-use instant::Instant;
-use ndarray::{Array5, Axis, StrideShape};
+use web_time::Instant;
+use ndarray::{Array5, ArrayViewD, Axis, Ix5, StrideShape};
 use npyz::{npz, Deserialize, NpyFile};
 use num_traits::Float;
-#[cfg(feature = "python")]
-use numpy::ndarray::ArrayViewD;
 use std::io::{Read, Seek};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
@@ -27,9 +25,7 @@ pub struct Volume {
 }
 
 impl Volume {
-    #[cfg(feature = "python")]
-    pub fn from_array(arr: ArrayViewD<f16>) -> Self {
-        use numpy::Ix5;
+    pub fn from_array(arr: ArrayViewD<f16>) -> Result<Self, anyhow::Error> {
 
         let shape = arr.shape().to_vec();
 
@@ -38,7 +34,7 @@ impl Volume {
             4 => arr.insert_axis(Axis(0)),
             _ => arr,
         };
-        let data: Array5<f16> = arr.into_dimensionality::<Ix5>().unwrap().into_owned();
+        let data: Array5<f16> = arr.into_dimensionality::<Ix5>()?.into_owned();
         let shape = data.shape().to_vec();
         let resolution = [shape[2] as u32, shape[3] as u32, shape[4] as u32];
 
@@ -62,12 +58,27 @@ impl Volume {
             max_value = min_value + f16::one();
         }
 
-        Self {
+
+        let channels = data.shape()[0];
+        let mut histograms = vec![[0f32; HISTOGRAM_BINS]; channels];
+        let numel: usize = data.shape().iter().skip(1).product();
+        for (c, channel_data) in data.axis_iter(Axis(0)).enumerate() {
+            for &value in channel_data.iter() {
+                let bin = ((value.to_f32() - min_value.to_f32()) / (max_value - min_value).to_f32()
+                    * (HISTOGRAM_BINS - 1) as f32)
+                    .floor() as usize;
+                histograms[c][bin] += 1. / numel as f32;
+            }
+        }
+
+
+        Ok(Self {
             aabb,
             min_value: min_value.to_f32(),
             max_value: max_value.to_f32(),
             data: data,
-        }
+            histograms
+        })
     }
 
     pub fn load_npy<'a, R>(reader: R, time_first: bool) -> anyhow::Result<Self>
@@ -125,51 +136,12 @@ impl Volume {
             f16::from_f64(v64)
         });
 
-        let (min_value, mut max_value) = arr
-            .iter()
-            .fold((f16::MAX, f16::MIN), |(acc_min, acc_max), b| {
-                (acc_min.min(*b), acc_max.max(*b))
-            });
-
-        if min_value >= max_value {
-            max_value = min_value + f16::one();
-        }
 
         if time_first {
             arr.swap_axes(0, 1);
         }
-
-        let channels = arr.shape()[0];
-        let mut histograms = vec![[0f32; HISTOGRAM_BINS]; channels];
-        let numel: usize = arr.shape().iter().skip(1).product();
-        for (c, channel_data) in arr.axis_iter(Axis(0)).enumerate() {
-            for &value in channel_data.iter() {
-                let bin = ((value.to_f32() - min_value.to_f32()) / (max_value - min_value).to_f32()
-                    * (HISTOGRAM_BINS - 1) as f32)
-                    .floor() as usize;
-                histograms[c][bin] += 1. / numel as f32;
-            }
-        }
-
-        let res_min = shape.iter().skip(2).min().unwrap();
-
-        let aabb = Aabb {
-            min: Point3::new(0.0, 0.0, 0.0),
-            max: Point3::new(
-                shape[4] as f32 / *res_min as f32,
-                shape[3] as f32 / *res_min as f32,
-                shape[2] as f32 / *res_min as f32,
-            ),
-        };
         log::info!("read volume in {:?}", start.elapsed());
-
-        Ok(Self {
-            aabb,
-            min_value: min_value.to_f32(),
-            max_value: max_value.to_f32(),
-            data: arr,
-            histograms,
-        })
+        return Self::from_array(arr.view().into_dyn());
     }
 
     pub fn read<'a, R>(array: NpyFile<R>, time_first: bool) -> anyhow::Result<Self>

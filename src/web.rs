@@ -1,7 +1,7 @@
 use std::io::Cursor;
 
 use cgmath::Vector3;
-use instant::Duration;
+use web_time::Duration;
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -93,7 +93,10 @@ impl InlineViewerConfig {
 pub fn wasm_setup() {
     #[cfg(debug_assertions)]
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-    console_log::init().expect("could not initialize logger");
+    // #[cfg(not(debug_assertions))]
+    // console_log::init().expect("could not initialize logger");
+    // #[cfg(debug_assertions)]
+    console_log::init_with_level(log::Level::Debug).expect("could not initialize logger");
 }
 
 /// Start the viewer with the given canvas id and optional volume data and colormap.

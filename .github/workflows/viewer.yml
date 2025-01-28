@@ -47,7 +47,7 @@ jobs:
           python colormaps.py
       - name: Build
         run: |
-          cargo install wasm-bindgen-cli --version 0.2.92
+          cargo install wasm-bindgen-cli --version 0.2.100
           bash build_wasm.sh
 
       # build docs

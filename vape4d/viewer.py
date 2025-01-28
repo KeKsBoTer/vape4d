@@ -56,6 +56,7 @@ class ViewerSettings:
     vmax: Optional[float]
     distance_scale: float
     duration: Optional[float] = None
+    axis_scale: tuple = (1.0, 1.0, 1.0)
 
 
 def viewer(
@@ -70,6 +71,7 @@ def viewer(
     vmax=None,
     distance_scale=1.0,
     duration=None,
+    axis_scale=(1.0, 1.0, 1.0),
 ):
     """_summary_
 
@@ -101,6 +103,7 @@ def viewer(
             vmax,
             distance_scale,
             duration,
+            axis_scale
         ),
     )
 

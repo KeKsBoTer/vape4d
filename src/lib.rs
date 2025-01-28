@@ -9,7 +9,7 @@ use volume::VolumeGPU;
 use web_sys::HtmlCanvasElement;
 
 #[cfg(target_arch = "wasm32")]
-use instant::{Duration, Instant};
+use web_time::{Duration, Instant};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
 
@@ -18,11 +18,11 @@ mod web;
 #[cfg(target_arch = "wasm32")]
 pub use web::*;
 
-use cgmath::{Vector2, Vector3, Zero};
+use cgmath::{Vector2, Vector3};
 use winit::{
     application::ApplicationHandler,
-    dpi::{LogicalSize, PhysicalSize},
-    event::{DeviceEvent, ElementState, WindowEvent},
+    dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
+    event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
     keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowAttributes},
@@ -160,17 +160,13 @@ impl WindowContext {
         let mut size = window.inner_size();
         if size.width == 0 || size.height == 0 {
             size = LogicalSize::new(800, 600).to_physical(window.scale_factor());
-            #[cfg(target_arch = "wasm32")]
-            {
-                use winit::platform::web::WindowExtWebSys;
-                if let Some(canvas) = window.canvas() {
-                    size = PhysicalSize::new(canvas.width(), canvas.height());
-                }
-            };
         }
         let window = Arc::new(window);
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor{
+            backends: wgpu::Backends::all().symmetric_difference(wgpu::Backends::BROWSER_WEBGPU),
+            ..Default::default()
+        });
 
         let surface: wgpu::Surface = instance.create_surface(window.clone())?;
 
@@ -225,7 +221,7 @@ impl WindowContext {
             vmin: render_config.vmin,
             vmax: render_config.vmax,
             gamma_correction: !surface_format.is_srgb(),
-            axis_scale: Vector3::new(1., 1., 1.),
+            axis_scale: render_config.axis_scale
         };
 
         let mut controller = CameraController::new(0.1, 0.05);
@@ -454,7 +450,7 @@ pub struct App {
     config: RenderConfig,
     cmap: LinearSegmentedColorMap,
 
-    last_touch_position: Vector2<f64>,
+    last_touch_position: PhysicalPosition<f64>,
     last_draw: Instant,
 
     event_loop_proxy: Option<EventLoopProxy<WindowContext>>,
@@ -474,7 +470,7 @@ impl App {
             state: None,
             volume,
             config,
-            last_touch_position: Vector2::zero(),
+            last_touch_position: PhysicalPosition::new(0., 0.),
             last_draw: Instant::now(),
             event_loop_proxy: Some(event_loop_proxy),
             cmap,
@@ -587,8 +583,7 @@ impl ApplicationHandler<WindowContext> for App {
                     WindowEvent::Touch(touch) => match touch.phase {
                         winit::event::TouchPhase::Started => {
                             state.controller.left_mouse_pressed = true;
-                            self.last_touch_position =
-                                Vector2::new(touch.location.x, touch.location.y);
+                            self.last_touch_position = touch.location;
                         }
                         winit::event::TouchPhase::Ended => {
                             state.controller.left_mouse_pressed = false;
@@ -598,11 +593,16 @@ impl ApplicationHandler<WindowContext> for App {
                                 (touch.location.x - self.last_touch_position.x) as f32,
                                 (touch.location.y - self.last_touch_position.y) as f32,
                             );
-                            self.last_touch_position =
-                                Vector2::new(touch.location.x, touch.location.y);
+                            self.last_touch_position = touch.location;
                         }
                         _ => {}
                     },
+                    WindowEvent::CursorMoved { position ,..}=>{
+                        let delta_x = position.x - self.last_touch_position.x;
+                        let delta_y = position.y - self.last_touch_position.y;
+                        state.controller.process_mouse(delta_x as f32, delta_y as f32);
+                        self.last_touch_position = position;
+                    }
                     WindowEvent::MouseInput {
                         state: button_state,
                         button,
@@ -676,23 +676,6 @@ impl ApplicationHandler<WindowContext> for App {
         }
     }
 
-    fn device_event(
-        &mut self,
-        _event_loop: &ActiveEventLoop,
-        _device_id: winit::event::DeviceId,
-        event: DeviceEvent,
-    ) {
-        match event {
-            DeviceEvent::MouseMotion { delta, .. } => {
-                if let Some(state) = &mut self.state {
-                    state
-                        .controller
-                        .process_mouse(delta.0 as f32, delta.1 as f32)
-                }
-            }
-            _ => {}
-        }
-    }
 
     fn about_to_wait(&mut self, #[allow(unused_variables)] event_loop: &ActiveEventLoop) {
         #[cfg(target_arch = "wasm32")]
