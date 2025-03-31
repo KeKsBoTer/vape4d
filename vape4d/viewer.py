@@ -51,7 +51,6 @@ class ViewerSettings:
     height: int
     background_color: tuple
     show_colormap_editor: bool
-    show_volume_info: bool
     vmin: Optional[float]
     vmax: Optional[float]
     distance_scale: float
@@ -66,7 +65,6 @@ def viewer(
     height: int = 600,
     background_color=(0.0, 0.0, 0.0, 1.0),
     show_colormap_editor=False,
-    show_volume_info=False,
     vmin=None,
     vmax=None,
     distance_scale=1.0,
@@ -82,7 +80,6 @@ def viewer(
         height (int, optional): viewer height. Defaults to 600.
         background_color (tuple, optional): background color in renderer. Defaults to black.
         show_colormap_editor (bool, optional): show the transfer function editor. Defaults to False.
-        show_volume_info (bool, optional): show the volume info window. Defaults to False.
         vmin (float, optional): all values in data are clamped to this value. Defaults to minimum value in data.
         vmax (float, optional):  all values in data are clamped to this value. Defaults to maximum value in data.
         distance_scale (float, optional): distance scale used for rendering. Defaults to 1.0.
@@ -98,7 +95,6 @@ def viewer(
             height,
             background_color,
             show_colormap_editor,
-            show_volume_info,
             vmin,
             vmax,
             distance_scale,

@@ -1,11 +1,10 @@
 use std::{f32::consts::PI, ops::RangeInclusive, time::Duration};
 
 use egui::{emath::Numeric, epaint::TextShape, vec2};
-use egui_plot::{Bar, BarChart, Legend, Plot, PlotImage, PlotPoint};
+use egui_plot::{Plot, PlotImage, PlotPoint};
 
 use crate::{
     cmap::{ColorMap, COLORMAP_RESOLUTION},
-    volume::Volume,
     WindowContext,
 };
 
@@ -46,15 +45,22 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     ui.end_row();
                 }
 
-                ui.label("Step Size");
-                ui.add(
+                // spatial filter is nearest we use DDA and do not need step size
+                let uses_step_size =
+                    state.render_settings.spatial_filter != wgpu::FilterMode::Nearest;
+
+                ui.add_enabled(uses_step_size, egui::Label::new("Step Size"))
+                    .on_hover_text("Step size for the raymarching algorithm");
+                ui.add_enabled(
+                    uses_step_size,
                     egui::DragValue::new(&mut state.render_settings.step_size)
                         .speed(0.01)
                         .range((1e-3)..=(0.1)),
                 );
                 ui.end_row();
 
-                ui.label("Axis Scale");
+                ui.label("Axis Scale")
+                    .on_hover_text("Scale the volume in x, y and z direction");
                 ui.horizontal(|ui| {
                     ui.add(
                         egui::DragValue::new(&mut state.render_settings.axis_scale.x)
@@ -80,7 +86,9 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                 });
                 ui.end_row();
 
-                ui.label("Distance Scale");
+                ui.label("Density Scale").on_hover_text(
+                    "Scale the density of the volume. A higher value makes the volume more opaque.",
+                );
                 ui.add(
                     egui::DragValue::new(&mut state.render_settings.distance_scale)
                         .speed(0.01)
@@ -174,14 +182,45 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
             });
     });
 
+    egui::containers::Area::new("info icon".into())
+        .anchor(egui::Align2::RIGHT_TOP, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.heading("ℹ")
+                .on_hover_cursor(egui::CursorIcon::Help)
+                .on_hover_ui(|ui| {
+                    egui::Grid::new("volume_info")
+                        .num_columns(2)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.heading("Volume Info");
+                            ui.end_row();
+                            ui.label("timesteps");
+                            ui.label(state.volume.volume.timesteps().to_string());
+                            ui.end_row();
+                            ui.label("channels");
+                            ui.label(state.volume.volume.channels().to_string());
+                            ui.end_row();
+                            ui.label("resolution");
+                            let res = state.volume.volume.size();
+                            ui.label(format!("{}x{}x{} (WxHxD)", res.x, res.y, res.z));
+                            ui.end_row();
+                            ui.label("value range");
+                            ui.label(format!(
+                                "[{} , {}]",
+                                state.volume.volume.min_value, state.volume.volume.max_value
+                            ));
+                            ui.end_row();
+                        });
+                });
+        });
     // let mut cmap = state.cmap.clone();
 
     if state.colormap_editor_visible {
         egui::Window::new("Transfer Function")
             .default_size(vec2(300., 50.))
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("vmin");
+                egui::Grid::new("render_settings").show(ui, |ui|{
+                    ui.label("Value Range");
                     let min_b = state
                         .render_settings
                         .vmin
@@ -193,24 +232,35 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
 
                     let vmin_min = state.volume.volume.min_value.min(min_b);
                     let vmax_max = state.volume.volume.max_value.max(max_b);
-                    optional_drag(
-                        ui,
-                        &mut state.render_settings.vmin,
-                        Some(vmin_min..=max_b),
-                        Some(0.01),
-                        Some(vmin_min),
-                    );
-                    ui.label("vmax");
-                    optional_drag(
-                        ui,
-                        &mut state.render_settings.vmax,
-                        Some(min_b..=vmax_max),
-                        Some(0.01),
-                        Some(vmax_max),
-                    );
-                });
+                    ui.horizontal(|ui| {
+                        ui.label("Min").on_hover_text("Minimum value for the colormap");
+                       
+                        optional_drag(
+                            ui,
+                            &mut state.render_settings.vmin,
+                            Some(vmin_min..=max_b),
+                            Some(0.01),
+                            Some(vmin_min),
+                        );
+                    });
+                    ui.end_row();
+                    ui.label("");
+
+                    ui.horizontal(|ui| {
+
+                        ui.label("Max").on_hover_text("Maximum value for the colormap");
+                        optional_drag(
+                            ui,
+                            &mut state.render_settings.vmax,
+                            Some(min_b..=vmax_max),
+                            Some(0.01),
+                            Some(vmax_max),
+                        );
+                    });
                 
+                ui.end_row();
                 if state.cmap_select_visible {
+                    ui.label("Colormap");
                     ui.horizontal(|ui| {
                         let cmaps = &COLORMAPS;
                         let mut selected_cmap: (String, String) = ui.ctx().data_mut(|d| {
@@ -224,7 +274,6 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                             d.get_temp_mut_or("cmap_search".into(), "".to_string())
                                 .clone()
                         });
-                        ui.label("Colormap");
                         let old_selected_cmap = selected_cmap.clone();
                         egui::ComboBox::new("cmap_select", "")
                             .selected_text(selected_cmap.1.clone())
@@ -260,14 +309,13 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                                 }
                             });
                         if old_selected_cmap != selected_cmap {
-                            let old_alpha = state.cmap.a.clone();
-                            state.cmap = cmaps[&selected_cmap.0][&selected_cmap.1]
-                                .into_linear_segmented(COLORMAP_RESOLUTION);
-                            if state.cmap.a.is_none()
+                            let old_alpha = state.render_settings.cmap.a.clone();
+                            state.render_settings.cmap = cmaps[&selected_cmap.0][&selected_cmap.1].clone();
+                            if state.render_settings.cmap.a.is_none()
                                 || cmaps[&selected_cmap.0][&selected_cmap.1]
                                     .has_boring_alpha_channel()
                             {
-                                state.cmap.a = old_alpha;
+                                state.render_settings.cmap.a = old_alpha;
                             }
                             ui.ctx().data_mut(|d| {
                                 d.insert_persisted("selected_cmap".into(), selected_cmap);
@@ -275,14 +323,16 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                         }
                         ui.ctx()
                             .data_mut(|d| d.insert_temp("cmap_search".into(), search_term));
-                        if state.cmap.a.is_none() {
-                            state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (1.0, 1.0, 1.0)]);
+                        if state.render_settings.cmap.a.is_none() {
+                            state.render_settings.cmap.a = Some(vec![(0.0, 1.0, 1.0), (1.0, 1.0, 1.0)]);
                         }
-                        if ui.button("↔").clicked() {
-                            state.cmap = (&state.cmap).reverse();
+                        if ui.button("↔").on_hover_text("Flip colormap").clicked() {
+                            state.render_settings.cmap = (&state.render_settings.cmap).reverse();
                         }
                     });
                 }
+
+            });
                 let vmin = state
                     .render_settings
                     .vmin
@@ -291,56 +341,59 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     .render_settings
                     .vmax
                     .unwrap_or(state.volume.volume.max_value);
-                show_cmap(ui, egui::Id::new("cmap preview"), &state.cmap, vmin, vmax);
+                show_cmap(ui, egui::Id::new("cmap preview"), &state.render_settings.cmap, vmin, vmax);
 
-                ui.heading("Alpha Channel");
                 ui.end_row();
+                egui::CollapsingHeader::new("Transfer Function")
+                    .default_open(true)
+                    .show_unindented(ui, |ui| {
+                    
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Presets:");
                     let v_hack = ui
                         .button("\\/")
                         .on_hover_text("double click for smooth version");
                     if v_hack.clicked() {
-                        state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (0.5, 0., 0.), (1.0, 1.0, 1.0)]);
+                        state.render_settings.cmap.a = Some(vec![(0.0, 1.0, 1.0), (0.5, 0., 0.), (1.0, 1.0, 1.0)]);
                     }
                     if v_hack.double_clicked() {
-                        state.cmap.a =
+                        state.render_settings.cmap.a =
                             Some(build_segments(25, |x| ((x * 2. * PI).cos() + 1.) / 2.));
                     }
                     let slope_hack = ui
                         .button("/")
                         .on_hover_text("double click for smooth version");
                     if slope_hack.clicked() {
-                        state.cmap.a = Some(build_segments(2, |x| (-(x * PI).cos() + 1.) / 2.));
+                        state.render_settings.cmap.a = Some(build_segments(2, |x| (-(x * PI).cos() + 1.) / 2.));
                     }
                     if slope_hack.double_clicked() {
-                        state.cmap.a = Some(build_segments(25, |x| (-(x * PI).cos() + 1.) / 2.));
+                        state.render_settings.cmap.a = Some(build_segments(25, |x| (-(x * PI).cos() + 1.) / 2.));
                     }
                     let double_v_hack = ui
                         .button("/\\/\\")
                         .on_hover_text("double click for smooth version");
                     if double_v_hack.clicked() {
-                        state.cmap.a =
+                        state.render_settings.cmap.a =
                             Some(build_segments(5, |x| (-(x * 4. * PI).cos() + 1.) / 2.));
                     }
                     if double_v_hack.double_clicked() {
-                        state.cmap.a =
+                        state.render_settings.cmap.a =
                             Some(build_segments(25, |x| (-(x * 4. * PI).cos() + 1.) / 2.));
                     }
                     if ui.button("-").clicked() {
-                        state.cmap.a = Some(vec![(0.0, 1.0, 1.0), (1.0, 1.0, 1.0)]);
+                        state.render_settings.cmap.a = Some(vec![(0.0, 1.0, 1.0), (1.0, 1.0, 1.0)]);
                     }
                 });
 
                 ui.separator();
 
-                if let Some(a) = &mut state.cmap.a {
+                if let Some(a) = &mut state.render_settings.cmap.a {
                     tf_ui(ui, a)
                     .on_hover_text("Drag anchor points to change transfer function.\nLeft-Click for new anchor point.\nRight-Click to delete anchor point.");
                 }
                 ui.end_row();
                 if ui.button("Save Colormap").clicked(){
-                    let cmap_data = serde_json::to_vec(&state.cmap).unwrap();
+                    let cmap_data = serde_json::to_vec(&state.render_settings.cmap).unwrap();
                     #[cfg(target_arch = "wasm32")]
                     wasm_bindgen_futures::spawn_local(async move{
                         let file = rfd::AsyncFileDialog::new().set_file_name("colormap.json").save_file().await;
@@ -357,36 +410,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     }
                 }
             });
-    }
-    state
-        .cmap_gpu
-        .update(&state.wgpu_context.queue, &state.cmap);
-
-    if state.volume_info_visible {
-        egui::Window::new("Volume Info").show(ctx, |ui| {
-            egui::Grid::new("volume_info")
-                .num_columns(2)
-                .striped(true)
-                .show(ui, |ui| {
-                    ui.label("timesteps");
-                    ui.label(state.volume.volume.timesteps().to_string());
-                    ui.end_row();
-                    ui.label("channels");
-                    ui.label(state.volume.volume.channels().to_string());
-                    ui.end_row();
-                    ui.label("resolution");
-                    let res = state.volume.volume.size();
-                    ui.label(format!("{}x{}x{} (WxHxD)", res.x, res.y, res.z));
-                    ui.end_row();
-                    ui.label("value range");
-                    ui.label(format!(
-                        "[{} , {}]",
-                        state.volume.volume.min_value, state.volume.volume.max_value
-                    ));
-                    ui.end_row();
-                });
-            histograms(ui, "histograms".into(), &state.volume.volume);
-        });
+            });
     }
 
     let frame_rect = ctx.available_rect();
@@ -398,11 +422,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
         .show(ctx, |ui| {
             let (response, painter) = ui.allocate_painter(
                 vec2(100., 100.),
-                Sense {
-                    click: false,
-                    drag: false,
-                    focusable: false,
-                },
+                Sense::empty()
             );
 
             let to_screen = emath::RectTransform::from_to(
@@ -441,6 +461,8 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                 ));
             }
         });
+
+
     let repaint = ctx.has_requested_repaint();
     return repaint;
 }
@@ -534,10 +556,7 @@ pub fn tf_ui(ui: &mut Ui, points: &mut Vec<(f32, f32, f32)>) -> egui::Response {
     response
 }
 
-use std::hash::Hash;
-fn load_or_create<C>(ui: &egui::Ui, cmap: C, n: u32) -> egui::TextureId
-where
-    C: ColorMap + Hash,
+fn load_or_create(ui: &egui::Ui, cmap: &ColorMap, n: u32) -> egui::TextureId
 {
     let id = Id::new(&cmap);
     let tex: Option<egui::TextureHandle> = ui.ctx().data_mut(|d| d.get_temp(id));
@@ -554,6 +573,40 @@ where
             );
             let tex_id = tex.id();
             ui.ctx().data_mut(|d| d.insert_temp(id, tex));
+            return tex_id;
+        }
+    }
+}
+
+// stores colormap texture in egui context
+// only updates texture if it changed
+fn cmap_preview(ui: &egui::Ui, id: Id, cmap: &ColorMap, n: u32) -> egui::TextureId {
+    let tex: Option<(Id, egui::TextureHandle)> = ui.ctx().data_mut(|d| d.get_temp(id));
+    match tex {
+        Some((old_id, mut tex)) => {
+            if old_id != id.with(&cmap) {
+                tex.set(
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [n as usize, 1],
+                        bytemuck::cast_slice(&cmap.rasterize(n as usize)),
+                    ),
+                    egui::TextureOptions::LINEAR,
+                );
+            }
+            tex.id()
+        }
+        None => {
+            let tex = ui.ctx().load_texture(
+                id.value().to_string(),
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [n as usize, 1],
+                    bytemuck::cast_slice(&cmap.rasterize(n as usize)),
+                ),
+                egui::TextureOptions::LINEAR,
+            );
+            let tex_id = tex.id();
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(id, (id.with(cmap), tex)));
             return tex_id;
         }
     }
@@ -597,8 +650,8 @@ fn optional_drag<T: Numeric>(
     }
 }
 
-fn show_cmap(ui: &mut egui::Ui, id: egui::Id, cmap: impl ColorMap + Hash, vmin: f32, vmax: f32) {
-    let texture = load_or_create(ui, cmap, COLORMAP_RESOLUTION);
+fn show_cmap(ui: &mut egui::Ui, id: egui::Id, cmap: &ColorMap, vmin: f32, vmax: f32) {
+    let texture = cmap_preview(ui, id, cmap, COLORMAP_RESOLUTION);
     let width = vmax - vmin;
     let height = width / 5.;
     let image = PlotImage::new(
@@ -609,43 +662,24 @@ fn show_cmap(ui: &mut egui::Ui, id: egui::Id, cmap: impl ColorMap + Hash, vmin: 
     let plot = Plot::new(id)
         .show_x(true)
         .show_y(false)
-        .height(100.)
+        .height(60.)
         .show_background(false)
         .show_grid(false)
+        .include_x(vmin)
+        .include_x(vmax)
         .custom_y_axes(vec![])
         .allow_boxed_zoom(false)
         .allow_double_click_reset(false)
         .allow_drag(false)
         .allow_scroll(false)
-        .allow_zoom(false);
+        .allow_zoom(false).set_margin_fraction(egui::Vec2::ZERO);
     plot.show(ui, |plot_ui| {
         plot_ui.image(image);
     });
 }
 
-fn histograms(ui: &mut Ui, id: egui::Id, volume: &Volume) {
-    let plot = Plot::new(id).legend(Legend::default());
-    plot.show(ui, |plot_ui| {
-        for c in 0..volume.channels() {
-            let vmin = volume.min_value as f64;
-            let vmax = volume.max_value as f64;
-            let hist = volume.get_histogram(c);
-            let bar_width = (vmax - vmin) / hist.len() as f64;
-            let bars = hist
-                .iter()
-                .enumerate()
-                .map(|(i, v)| {
-                    Bar::new(
-                        i as f64 / hist.len() as f64 * (vmax - vmin) + vmin,
-                        *v as f64,
-                    )
-                })
-                .collect();
-            plot_ui.bar_chart(BarChart::new(bars).name(format!("Channel {}", c)).width(bar_width));
-        }
-    });
-}
-
+/// builds transfer function segments from a list of values
+/// out values are (x,y0,y1) where y0 are the values before x and y1 are the values after x
 fn build_segments<F: Fn(f32) -> f32>(n: usize, f: F) -> Vec<(f32, f32, f32)> {
     (0..n)
         .map(|i| {

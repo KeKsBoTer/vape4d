@@ -1,17 +1,16 @@
 use bytemuck::Zeroable;
 use cgmath::{BaseNum, EuclideanSpace, MetricSpace, One, Point3, Vector3};
 use half::f16;
-#[cfg(target_arch = "wasm32")]
-use web_time::Instant;
 use ndarray::{Array5, ArrayViewD, Axis, Ix5, StrideShape};
 use npyz::{npz, Deserialize, NpyFile};
 use num_traits::Float;
 use std::io::{Read, Seek};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 use wgpu::util::{DeviceExt, TextureDataOrder};
 
-const HISTOGRAM_BINS: usize = 128;
 #[derive(Clone)]
 pub struct Volume {
     pub aabb: Aabb<f32>,
@@ -19,14 +18,10 @@ pub struct Volume {
     pub max_value: f32,
     /// array of shape [channels, timesteps, z, y, x]
     data: Array5<f16>,
-
-    /// one histogram per channel
-    histograms: Vec<[f32; HISTOGRAM_BINS]>,
 }
 
 impl Volume {
     pub fn from_array(arr: ArrayViewD<f16>) -> Result<Self, anyhow::Error> {
-
         let shape = arr.shape().to_vec();
 
         let arr = match shape.len() {
@@ -58,26 +53,11 @@ impl Volume {
             max_value = min_value + f16::one();
         }
 
-
-        let channels = data.shape()[0];
-        let mut histograms = vec![[0f32; HISTOGRAM_BINS]; channels];
-        let numel: usize = data.shape().iter().skip(1).product();
-        for (c, channel_data) in data.axis_iter(Axis(0)).enumerate() {
-            for &value in channel_data.iter() {
-                let bin = ((value.to_f32() - min_value.to_f32()) / (max_value - min_value).to_f32()
-                    * (HISTOGRAM_BINS - 1) as f32)
-                    .floor() as usize;
-                histograms[c][bin] += 1. / numel as f32;
-            }
-        }
-
-
         Ok(Self {
             aabb,
             min_value: min_value.to_f32(),
             max_value: max_value.to_f32(),
             data: data,
-            histograms
         })
     }
 
@@ -135,7 +115,6 @@ impl Volume {
             let v64: f64 = (*v).into();
             f16::from_f64(v64)
         });
-
 
         if time_first {
             arr.swap_axes(0, 1);
@@ -199,10 +178,6 @@ impl Volume {
             .to_string();
         let array = reader.by_name(arr_name.as_str())?.unwrap();
         Self::read(array, time_first)
-    }
-
-    pub fn get_histogram(&self, c: usize) -> &[f32; HISTOGRAM_BINS] {
-        &self.histograms[c]
     }
 }
 

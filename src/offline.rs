@@ -3,7 +3,7 @@ use image::{ImageBuffer, Rgba};
 
 use crate::{
     camera::{Camera, OrthographicProjection, Projection},
-    cmap::{ColorMapGPU, GenericColorMap, COLORMAP_RESOLUTION},
+    cmap::ColorMap,
     renderer::{RenderSettings, VolumeRenderer},
     volume::{Volume, VolumeGPU},
     WGPUContext,
@@ -14,7 +14,6 @@ async fn render_view<P: Projection>(
     queue: &wgpu::Queue,
     renderer: &mut VolumeRenderer,
     volume: &VolumeGPU,
-    cmap: &ColorMapGPU,
     camera: Camera<P>,
     render_settings: &RenderSettings,
     bg: wgpu::Color,
@@ -41,7 +40,7 @@ async fn render_view<P: Projection>(
         label: Some("render encoder"),
     });
     let channel = 0;
-    let frame_data = renderer.prepare(device, volume, &camera, &render_settings, cmap, channel);
+    let frame_data = renderer.prepare(device, volume, &camera, &render_settings, channel);
     {
         let mut render_pass = encoder
             .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -59,7 +58,7 @@ async fn render_view<P: Projection>(
                 occlusion_query_set: None,
             })
             .forget_lifetime();
-        renderer.render(&mut render_pass, &frame_data);
+        renderer.render(&queue,&mut render_pass, &frame_data);
     }
     queue.submit(std::iter::once(encoder.finish()));
     let img = download_texture(&target, device, queue).await;
@@ -68,7 +67,7 @@ async fn render_view<P: Projection>(
 
 pub async fn render_volume(
     volumes: Vec<Volume>,
-    cmap: GenericColorMap,
+    cmap: ColorMap,
     resolution: Vector2<u32>,
     frames: &[f32],
     bg: wgpu::Color,
@@ -80,7 +79,7 @@ pub async fn render_volume(
     axis_scale: Option<Vector3<f32>>,
 ) -> anyhow::Result<Vec<ImageBuffer<Rgba<u8>, Vec<u8>>>> {
     env_logger::init();
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::GL,
         ..Default::default()
     });
@@ -93,11 +92,10 @@ pub async fn render_volume(
         .into_iter()
         .map(|v| VolumeGPU::new(device, queue, v))
         .collect();
-    let cmap_gpu = ColorMapGPU::new(&cmap, device, queue, COLORMAP_RESOLUTION);
 
     let render_format = wgpu::TextureFormat::Rgba8UnormSrgb;
 
-    let mut renderer = VolumeRenderer::new(&device, render_format);
+    let mut renderer = VolumeRenderer::new(&device,&queue, render_format);
 
     let ratio = resolution.x as f32 / resolution.y as f32;
     let radius = aabb.radius();
@@ -113,7 +111,6 @@ pub async fn render_volume(
             queue,
             &mut renderer,
             &volume_gpu[0],
-            &cmap_gpu,
             camera,
             &RenderSettings {
                 time: *time,
@@ -123,6 +120,7 @@ pub async fn render_volume(
                 spatial_filter: spatial_interpolation,
                 temporal_filter: temporal_interpolation,
                 axis_scale: axis_scale.unwrap_or(Vector3::new(1., 1., 1.)),
+                cmap:cmap.clone(),
                 ..Default::default()
             },
             bg,
@@ -163,9 +161,9 @@ pub async fn download_texture(
 
     encoder.copy_texture_to_buffer(
         texture.as_image_copy(),
-        wgpu::ImageCopyBufferBase {
+        wgpu::TexelCopyBufferInfo {
             buffer: &staging_buffer,
-            layout: wgpu::ImageDataLayout {
+            layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(bytes_per_row),
                 rows_per_image: Some(fb_size.height),

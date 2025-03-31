@@ -8,14 +8,14 @@ description = "4D Volume Viewer"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wgpu = { version = "23.0", features = ["webgl"], default-features = true}
-winit = "0.30.8"
+wgpu = { version = "24.0", features = ["webgl"], default-features = true}
+winit = "0.30.9"
 cgmath = { version = "0.18.0", features = [
     "bytemuck",
 ], git = 'https://github.com/rustgd/cgmath' }
-env_logger = "0.11.3"
-clap = { version = "4.5", features = ["derive"] }#
-bytemuck = { version = "1.13", features = ["derive"] }
+env_logger = "0.11.7"
+clap = { version = "4.5.34", features = ["derive"] }#
+bytemuck = { version = "1.22", features = ["derive"] }
 anyhow = "1.0"
 byteorder = "1.4.3"
 num-traits = "0.2.16"
@@ -25,10 +25,10 @@ once_cell = { version = "1.20" }
 image = "0.25.5"
 
 
-egui = "0.30.0"
-egui-wgpu = "0.30.0"
-egui-winit = { version = "0.30.0", features = [], default-features = false }
-egui_plot = "0.30.0"
+egui = "0.31.1"
+egui-wgpu = "0.31"
+egui-winit = { version = "0.31.1", features = [], default-features = false }
+egui_plot = "0.31.0"
 
 npyz = { version = "0.8.3", features = ["npz", "half"] }
 futures-intrusive = "0.5.0"
@@ -38,8 +38,8 @@ serde_json = "1.0.137"
 # colormaps in binary
 include_dir = { version = "0.7.3" }
 # python bindings
-pyo3 = { version = "0.23.4", features = ["extension-module"], optional = true }
-numpy = { version = "0.23.0", optional = true, features = ["half"] }
+pyo3 = { version = "0.24.0", features = ["extension-module"], optional = true }
+numpy = { version = "0.24.0", optional = true, features = ["half"] }
 ndarray = { version = "0.16.1", features = ["rayon"]}
 rfd = { version = "0.15.2", features = ["file-handle-inner"] }
 rayon = {version = "1.5.1"}
@@ -56,7 +56,7 @@ web-sys = { version = "0.3.77", features = ["GpuColorDict",'Headers',
   'RequestMode',
   'Response',
   'Window','Location','UrlSearchParams'] }
-getrandom = { version = "0.2", features = ["js"] }
+getrandom = { version = "0.2.4", features = ["js"] }
 wasm-bindgen = "0.2.92"
 console_error_panic_hook = "0.1.7"
 wasm-bindgen-futures = "0.4.50"

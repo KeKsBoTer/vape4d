@@ -1,6 +1,6 @@
 use crate::{
     camera::{Camera, Projection, VIEWPORT_Y_FLIP},
-    cmap::ColorMapGPU,
+    cmap::{ColorMap, ColorMapGPU, COLORMAPS, COLORMAP_RESOLUTION},
     volume::{Aabb, Volume, VolumeGPU},
 };
 
@@ -12,10 +12,11 @@ pub struct VolumeRenderer {
     sampler_nearest: wgpu::Sampler,
     sampler_linear: wgpu::Sampler,
     format: wgpu::TextureFormat,
+    color_map: ColorMapGPU,
 }
 
 impl VolumeRenderer {
-    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+    pub fn new(device: &wgpu::Device,queue: &wgpu::Queue, color_format: wgpu::TextureFormat) -> Self {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("render pipeline layout"),
             bind_group_layouts: &[
@@ -74,11 +75,15 @@ impl VolumeRenderer {
             ..Default::default()
         });
 
+        let cmap = default_cmap();
+        let color_map = ColorMapGPU::new(&cmap, device, queue, COLORMAP_RESOLUTION);
+
         VolumeRenderer {
             pipeline,
             sampler_nearest,
             sampler_linear,
             format: color_format,
+            color_map
         }
     }
 
@@ -88,9 +93,8 @@ impl VolumeRenderer {
         volume: &VolumeGPU,
         camera: &Camera<P>,
         render_settings: &RenderSettings,
-        cmap: &'a ColorMapGPU,
         channel: usize,
-    ) -> PerFrameData<'a> {
+    ) -> PerFrameData {
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("camera buffer"),
             contents: bytemuck::bytes_of(&CameraUniform::from(camera)),
@@ -153,13 +157,14 @@ impl VolumeRenderer {
         });
         PerFrameData {
             bind_group,
-            cmap_bind_group: cmap.bindgroup(),
+            color_map: render_settings.cmap.clone(),
         }
     }
 
-    pub fn render(&self, render_pass: &mut wgpu::RenderPass<'static>, frame_data: &PerFrameData) {
+    pub fn render(&self,queue: &wgpu::Queue, render_pass: &mut wgpu::RenderPass<'static>, frame_data: &PerFrameData) {
+        self.color_map.update(queue, &frame_data.color_map);
         render_pass.set_bind_group(0, &frame_data.bind_group, &[]);
-        render_pass.set_bind_group(1, frame_data.cmap_bind_group, &[]);
+        render_pass.set_bind_group(1, self.color_map.bindgroup(), &[]);
         render_pass.set_pipeline(&self.pipeline);
 
         render_pass.draw(0..4, 0..1);
@@ -223,9 +228,9 @@ impl VolumeRenderer {
     }
 }
 
-pub struct PerFrameData<'a> {
+pub struct PerFrameData {
     bind_group: wgpu::BindGroup,
-    cmap_bind_group: &'a wgpu::BindGroup,
+    color_map: ColorMap,
 }
 
 #[repr(C)]
@@ -291,6 +296,7 @@ pub struct RenderSettings {
     pub vmax: Option<f32>,
     pub gamma_correction: bool,
     pub axis_scale: Vector3<f32>,
+    pub cmap:ColorMap
 }
 
 impl Default for RenderSettings {
@@ -306,8 +312,22 @@ impl Default for RenderSettings {
             vmax: None,
             gamma_correction: false,
             axis_scale: Vector3::new(1.0, 1.0, 1.0),
+            cmap: default_cmap(),
         }
     }
+}
+
+fn default_cmap() -> ColorMap {
+    let mut cmap = COLORMAPS
+        .get("seaborn")
+        .unwrap()
+        .get("icefire")
+        .unwrap()
+        .clone();
+    if cmap.has_boring_alpha_channel() {
+        cmap.a = Some(vec![(0., 0.8, 0.8), (1., 0.8, 0.8)]);
+    }
+    cmap
 }
 
 #[repr(C)]
@@ -317,7 +337,7 @@ pub struct RenderSettingsUniform {
     volume_aabb_max: Vector4<f32>,
     clipping_min: Vector4<f32>,
     clipping_max: Vector4<f32>,
-    
+
     time: f32,
     step_size: f32,
     temporal_filter: u32,

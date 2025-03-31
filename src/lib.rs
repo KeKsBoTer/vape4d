@@ -1,5 +1,5 @@
 use camera::{Camera, OrthographicProjection};
-use cmap::LinearSegmentedColorMap;
+use cmap::ColorMap;
 use controller::CameraController;
 use egui::FullOutput;
 use renderer::{RenderSettings, VolumeRenderer};
@@ -8,10 +8,10 @@ use volume::VolumeGPU;
 #[cfg(target_arch = "wasm32")]
 use web_sys::HtmlCanvasElement;
 
-#[cfg(target_arch = "wasm32")]
-use web_time::{Duration, Instant};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
+#[cfg(target_arch = "wasm32")]
+use web_time::{Duration, Instant};
 
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -28,10 +28,7 @@ use winit::{
     window::{Window, WindowAttributes},
 };
 
-use crate::{
-    cmap::{ColorMapGPU, COLORMAP_RESOLUTION},
-    volume::Volume,
-};
+use crate::volume::Volume;
 
 pub mod camera;
 pub mod cmap;
@@ -54,7 +51,6 @@ pub struct RenderConfig {
     pub no_vsync: bool,
     pub background_color: wgpu::Color,
     pub show_colormap_editor: bool,
-    pub show_volume_info: bool,
     pub vmin: Option<f32>,
     pub vmax: Option<f32>,
     pub distance_scale: f32,
@@ -70,7 +66,6 @@ impl Default for RenderConfig {
             no_vsync: false,
             background_color: wgpu::Color::BLACK,
             show_colormap_editor: true,
-            show_volume_info: true,
             vmin: None,
             vmax: None,
             distance_scale: 1.0,
@@ -135,8 +130,6 @@ pub struct WindowContext {
     renderer: VolumeRenderer,
 
     render_settings: RenderSettings,
-    cmap_gpu: cmap::ColorMapGPU,
-    cmap: LinearSegmentedColorMap,
 
     playing: bool,
     animation_duration: Duration,
@@ -144,7 +137,6 @@ pub struct WindowContext {
     selected_channel: Option<usize>,
 
     colormap_editor_visible: bool,
-    volume_info_visible: bool,
 
     cmap_select_visible: bool,
 }
@@ -154,7 +146,7 @@ impl WindowContext {
     async fn new(
         window: Window,
         volume: Volume,
-        cmap: LinearSegmentedColorMap,
+        cmap: ColorMap,
         render_config: RenderConfig,
     ) -> anyhow::Result<Self> {
         let mut size = window.inner_size();
@@ -163,7 +155,7 @@ impl WindowContext {
         }
         let window = Arc::new(window);
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor{
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all().symmetric_difference(wgpu::Backends::BROWSER_WEBGPU),
             ..Default::default()
         });
@@ -209,7 +201,7 @@ impl WindowContext {
 
         let ui_renderer = ui_renderer::EguiWGPU::new(device, surface_format, &window);
 
-        let renderer = VolumeRenderer::new(device, surface_format);
+        let renderer = VolumeRenderer::new(device,queue, surface_format);
 
         let render_settings = RenderSettings {
             clipping_aabb: None,
@@ -221,7 +213,8 @@ impl WindowContext {
             vmin: render_config.vmin,
             vmax: render_config.vmax,
             gamma_correction: !surface_format.is_srgb(),
-            axis_scale: render_config.axis_scale
+            axis_scale: render_config.axis_scale,
+            cmap
         };
 
         let mut controller = CameraController::new(0.1, 0.05);
@@ -241,7 +234,6 @@ impl WindowContext {
         let num_columns = volume.channels() as u32;
         let volumes_gpu = VolumeGPU::new(device, queue, volume);
 
-        let cmap_gpu = ColorMapGPU::new(&cmap, device, queue, COLORMAP_RESOLUTION);
         Ok(Self {
             wgpu_context,
             scale_factor: window.scale_factor() as f32,
@@ -257,14 +249,11 @@ impl WindowContext {
             volume: volumes_gpu,
             renderer,
             render_settings,
-            cmap_gpu,
-            cmap,
             animation_duration,
             playing: true,
             num_columns,
             selected_channel: None,
             colormap_editor_visible: render_config.show_colormap_editor,
-            volume_info_visible: render_config.show_volume_info,
 
             cmap_select_visible: render_config.show_cmap_select,
         })
@@ -375,7 +364,6 @@ impl WindowContext {
                 &self.volume,
                 &camera,
                 &self.render_settings,
-                &self.cmap_gpu,
                 selected_channel,
             ));
         } else {
@@ -389,7 +377,6 @@ impl WindowContext {
                     &self.volume,
                     &camera,
                     &self.render_settings,
-                    &self.cmap_gpu,
                     channel,
                 ));
             }
@@ -423,7 +410,7 @@ impl WindowContext {
                         1.,
                     );
                 }
-                self.renderer.render(&mut render_pass, &v);
+                self.renderer.render(&self.wgpu_context.queue,&mut render_pass, &v);
             }
 
             if let Some(state) = &ui_state {
@@ -448,7 +435,7 @@ pub struct App {
     state: Option<WindowContext>,
     volume: Volume,
     config: RenderConfig,
-    cmap: LinearSegmentedColorMap,
+    cmap: ColorMap,
 
     last_touch_position: PhysicalPosition<f64>,
     last_draw: Instant,
@@ -462,7 +449,7 @@ impl App {
     fn new(
         event_loop_proxy: EventLoopProxy<WindowContext>,
         volume: Volume,
-        cmap: LinearSegmentedColorMap,
+        cmap: ColorMap,
         config: RenderConfig,
         #[cfg(target_arch = "wasm32")] canvas_id: String,
     ) -> Self {
@@ -597,10 +584,12 @@ impl ApplicationHandler<WindowContext> for App {
                         }
                         _ => {}
                     },
-                    WindowEvent::CursorMoved { position ,..}=>{
+                    WindowEvent::CursorMoved { position, .. } => {
                         let delta_x = position.x - self.last_touch_position.x;
                         let delta_y = position.y - self.last_touch_position.y;
-                        state.controller.process_mouse(delta_x as f32, delta_y as f32);
+                        state
+                            .controller
+                            .process_mouse(delta_x as f32, delta_y as f32);
                         self.last_touch_position = position;
                     }
                     WindowEvent::MouseInput {
@@ -676,7 +665,6 @@ impl ApplicationHandler<WindowContext> for App {
         }
     }
 
-
     fn about_to_wait(&mut self, #[allow(unused_variables)] event_loop: &ActiveEventLoop) {
         #[cfg(target_arch = "wasm32")]
         use winit::platform::web::WindowExtWebSys;
@@ -699,7 +687,7 @@ impl ApplicationHandler<WindowContext> for App {
 
 pub async fn open_window(
     volumes: Volume,
-    cmap: LinearSegmentedColorMap,
+    cmap: ColorMap,
     config: RenderConfig,
     #[cfg(target_arch = "wasm32")] canvas_id: String,
 ) {

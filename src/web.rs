@@ -1,14 +1,14 @@
 use std::io::Cursor;
 
 use cgmath::Vector3;
-use web_time::Duration;
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::js_sys::{ArrayBuffer, Uint8Array};
 use web_sys::{Request, RequestInit, RequestMode, Response};
+use web_time::Duration;
 
-use crate::cmap::{self, GenericColorMap, COLORMAP_RESOLUTION};
+use crate::cmap::{self, ColorMap};
 use crate::volume::Volume;
 use crate::{open_window, RenderConfig};
 
@@ -45,7 +45,6 @@ impl From<Color> for wgpu::Color {
 pub struct InlineViewerConfig {
     pub background_color: Color,
     pub show_colormap_editor: bool,
-    pub show_volume_info: bool,
     pub show_cmap_select: bool,
     // for normalization
     pub vmin: Option<f32>,
@@ -63,7 +62,6 @@ impl InlineViewerConfig {
     pub fn new(
         background_color: Color,
         show_colormap_editor: bool,
-        show_volume_info: bool,
         show_cmap_select: bool,
         vmin: Option<f32>,
         vmax: Option<f32>,
@@ -76,7 +74,6 @@ impl InlineViewerConfig {
         Self {
             background_color,
             show_colormap_editor,
-            show_volume_info,
             show_cmap_select,
             vmin,
             vmax,
@@ -112,7 +109,6 @@ pub async fn viewer_wasm(
             no_vsync: false,
             background_color: settings.background_color.into(),
             show_colormap_editor: settings.show_colormap_editor,
-            show_volume_info: settings.show_volume_info,
             vmin: settings.vmin,
             vmax: settings.vmax,
             distance_scale: settings.distance_scale,
@@ -236,12 +232,10 @@ async fn start_viewer(
         None => load_colormap().await?,
     };
     let colormap = match colormap {
-        Some(data) => GenericColorMap::read(Cursor::new(data))
-            .map_err(|e| JsError::new(&format!("Failed to load colormap: {}", e)))?
-            .into_linear_segmented(COLORMAP_RESOLUTION),
+        Some(data) => ColorMap::read(Cursor::new(data))
+            .map_err(|e| JsError::new(&format!("Failed to load colormap: {}", e)))?,
         None => cmap::COLORMAPS["seaborn"]["icefire"]
             .clone()
-            .into_linear_segmented(COLORMAP_RESOLUTION),
     };
 
     wasm_bindgen_futures::spawn_local(async move {

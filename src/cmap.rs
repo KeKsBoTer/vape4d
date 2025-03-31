@@ -1,6 +1,6 @@
 use std::{
     hash::{Hash, Hasher},
-    io::{Read, Seek, SeekFrom, Write},
+    io::{Read, Seek, SeekFrom},
 };
 
 use std::{collections::HashMap, io::Cursor};
@@ -9,7 +9,6 @@ use anyhow::Ok;
 use cgmath::Vector4;
 
 use include_dir::Dir;
-use npyz::WriterBuilder;
 #[cfg(feature = "python")]
 use numpy::ndarray::{ArrayViewD, Axis};
 use wgpu::{util::DeviceExt, Extent3d};
@@ -24,14 +23,16 @@ static COLORMAPS_SEABORN: include_dir::Dir = include_dir!("colormaps/seaborn");
 
 static COLORMAPS_CMASHER: include_dir::Dir = include_dir!("colormaps/cmasher");
 
-fn load_cmaps(dir: &Dir) -> HashMap<String, GenericColorMap> {
-    let cmaps: HashMap<String, GenericColorMap> = dir
+pub const COLORMAP_RESOLUTION: u32 = 256;
+
+fn load_cmaps(dir: &Dir) -> HashMap<String, ColorMap> {
+    let cmaps: HashMap<String, ColorMap> = dir
         .files()
         .filter_map(|f| {
             let file_name = f.path();
             let reader = Cursor::new(f.contents());
             let name = file_name.file_stem().unwrap().to_str().unwrap().to_string();
-            let cmap = GenericColorMap::read(reader).unwrap();
+            let cmap = ColorMap::read(reader).unwrap();
             return Some((name, cmap));
         })
         .collect();
@@ -40,7 +41,7 @@ fn load_cmaps(dir: &Dir) -> HashMap<String, GenericColorMap> {
 
 // list of predefined colormaps
 
-pub static COLORMAPS: Lazy<HashMap<String, HashMap<String, GenericColorMap>>> = Lazy::new(|| {
+pub static COLORMAPS: Lazy<HashMap<String, HashMap<String, ColorMap>>> = Lazy::new(|| {
     let mut cmaps = HashMap::new();
     cmaps.insert("matplotlib".to_string(), load_cmaps(&COLORMAPS_MATPLOTLIB));
     cmaps.insert("seaborn".to_string(), load_cmaps(&COLORMAPS_SEABORN));
@@ -50,7 +51,7 @@ pub static COLORMAPS: Lazy<HashMap<String, HashMap<String, GenericColorMap>>> = 
 });
 
 #[derive(Debug, Clone)]
-pub struct ListedColorMap(Vec<Vector4<u8>>);
+struct ListedColorMap(Vec<Vector4<u8>>);
 
 impl Hash for ListedColorMap {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -98,50 +99,48 @@ impl ListedColorMap {
             .collect();
         Ok(Self::new(values))
     }
-    pub fn update_alpha(&mut self, alphas: &[u8]) {
-        if alphas.len() != self.0.len() {
-            panic!("Alpha channel must have the same length as the color map")
-        }
-        self.0 = self
-            .0
-            .iter()
-            .zip(alphas)
-            .map(|(v, a)| Vector4::new(v[0], v[1], v[2], *a))
-            .collect();
-    }
 
-    pub fn save_npy<F: Write>(&self, f: F) -> anyhow::Result<()> {
-        let mut out_file = npyz::WriteOptions::new()
-            .order(npyz::Order::C)
-            .shape(&[self.0.len() as u64, 4])
-            .default_dtype()
-            .writer(f)
-            .begin_nd()?;
-        out_file.extend(self.0.iter().flat_map(|c| {
-            vec![
-                c.x as f32 / 255.,
-                c.y as f32 / 255.,
-                c.z as f32 / 255.,
-                c.w as f32 / 255.,
-            ]
-        }))?;
-        out_file.finish()?;
-        Ok(())
-    }
-}
-
-impl<'a> ColorMap for &'a ListedColorMap {
-    type Item = ListedColorMap;
     fn sample(&self, x: f32) -> Vector4<u8> {
         let n = self.0.len() as f32;
-        let i = (x * n).min(n - 1.0).max(0.0) as usize;
-        self.0[i] // TODO linear interpolation
+        let left = (x * n).min(n - 1.0).max(0.0) as usize;
+        let right = (left + 1).min(self.0.len() - 1);
+        let fract = x * n - left as f32;
+        let v0 = self.0[left];
+        let v1 = self.0[right];
+        Vector4::new(
+            (v0.x as f32 * (1.0 - fract) + v1.x as f32 * fract) as u8,
+            (v0.y as f32 * (1.0 - fract) + v1.y as f32 * fract) as u8,
+            (v0.z as f32 * (1.0 - fract) + v1.z as f32 * fract) as u8,
+            (v0.w as f32 * (1.0 - fract) + v1.w as f32 * fract) as u8,
+        )
     }
 
-    fn reverse(&self) -> ListedColorMap {
-        let mut cmap = self.0.clone();
-        cmap.reverse();
-        ListedColorMap::new(cmap)
+    pub fn into_colormap(&self, n: u32) -> ColorMap {
+        let mut r = vec![];
+        let mut g = vec![];
+        let mut b = vec![];
+        let mut a = vec![];
+        for i in 0..n {
+            let v = self.sample(i as f32 / (n - 1) as f32);
+            let x = i as f32 / (n - 1) as f32;
+            r.push((x, v.x as f32 / 255., v.x as f32 / 255.));
+            g.push((x, v.y as f32 / 255., v.y as f32 / 255.));
+            b.push((x, v.z as f32 / 255., v.z as f32 / 255.));
+            a.push((x, v.w as f32 / 255., v.w as f32 / 255.));
+        }
+
+        // merge neighboring points with the same alpha value
+        merge_neighbours(&mut r);
+        merge_neighbours(&mut g);
+        merge_neighbours(&mut b);
+        merge_neighbours(&mut a);
+
+        ColorMap {
+            r,
+            g,
+            b,
+            a: Some(a),
+        }
     }
 }
 
@@ -150,21 +149,8 @@ pub struct ColorMapGPU {
     bindgroup: wgpu::BindGroup,
 }
 
-pub trait ColorMap {
-    type Item;
-    fn sample(&self, x: f32) -> Vector4<u8>;
-
-    fn rasterize(&self, n: usize) -> Vec<Vector4<u8>> {
-        (0..n)
-            .map(|i| self.sample(i as f32 / (n - 1) as f32))
-            .collect()
-    }
-
-    fn reverse(&self) -> Self::Item;
-}
-
 impl ColorMapGPU {
-    pub fn new(cmap: impl ColorMap, device: &wgpu::Device, queue: &wgpu::Queue, n: u32) -> Self {
+    pub fn new(cmap: &ColorMap, device: &wgpu::Device, queue: &wgpu::Queue, n: u32) -> Self {
         let (texture, bindgroup) = Self::create(device, queue, cmap, n);
         Self { texture, bindgroup }
     }
@@ -180,7 +166,7 @@ impl ColorMapGPU {
     fn create(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        cmap: impl ColorMap,
+        cmap: &ColorMap,
         n: u32,
     ) -> (wgpu::Texture, wgpu::BindGroup) {
         let texture = device.create_texture_with_data(
@@ -257,16 +243,16 @@ impl ColorMapGPU {
         })
     }
 
-    pub fn update(&self, queue: &wgpu::Queue, cmap: impl ColorMap) {
+    pub fn update(&self, queue: &wgpu::Queue, cmap: &ColorMap) {
         queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &self.texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             bytemuck::cast_slice(&cmap.rasterize(self.size() as usize)),
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: None,
                 rows_per_image: None,
@@ -281,7 +267,7 @@ impl ColorMapGPU {
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct LinearSegmentedColorMap {
+pub struct ColorMap {
     /// x, y0,y1
     #[serde(alias = "red")]
     pub r: Vec<(f32, f32, f32)>,
@@ -293,7 +279,7 @@ pub struct LinearSegmentedColorMap {
     pub a: Option<Vec<(f32, f32, f32)>>,
 }
 
-impl LinearSegmentedColorMap {
+impl ColorMap {
     pub fn new(
         r: Vec<(f32, f32, f32)>,
         g: Vec<(f32, f32, f32)>,
@@ -328,6 +314,19 @@ impl LinearSegmentedColorMap {
         Ok(Self { r, g, b, a })
     }
 
+    pub fn read<R: Read + Seek>(mut reader: R) -> anyhow::Result<Self> {
+        let mut start = [0; 6];
+        reader.read_exact(&mut start)?;
+        reader.seek(SeekFrom::Start(0))?;
+        if start.eq(b"\x93NUMPY") {
+            // numpy file
+            Ok(ListedColorMap::from_npy(reader)?.into_colormap(COLORMAP_RESOLUTION))
+        } else {
+            // json file
+            Ok(Self::from_json(reader)?)
+        }
+    }
+
     pub fn from_json<R: Read>(reader: R) -> anyhow::Result<Self> {
         Ok(serde_json::from_reader(reader)?)
     }
@@ -342,37 +341,14 @@ impl LinearSegmentedColorMap {
         }
         return true;
     }
-    pub fn from_color_map(cmap: impl ColorMap, n: u32) -> Self {
-        let mut r = vec![];
-        let mut g = vec![];
-        let mut b = vec![];
-        let mut a = vec![];
-        for (i, v) in cmap.rasterize(n as usize).iter().enumerate() {
-            let x = i as f32 / (n - 1) as f32;
-            r.push((x, v.x as f32 / 255., v.x as f32 / 255.));
-            g.push((x, v.y as f32 / 255., v.y as f32 / 255.));
-            b.push((x, v.z as f32 / 255., v.z as f32 / 255.));
-            a.push((x, v.w as f32 / 255., v.w as f32 / 255.));
-        }
 
-        // merge neighboring points with the same alpha value
-        merge_neighbours(&mut r);
-        merge_neighbours(&mut g);
-        merge_neighbours(&mut b);
-        merge_neighbours(&mut a);
-
-        Self {
-            r,
-            g,
-            b,
-            a: Some(a),
-        }
+    pub fn rasterize(&self, n: usize) -> Vec<Vector4<u8>> {
+        (0..n)
+            .map(|i| self.sample(i as f32 / (n - 1) as f32))
+            .collect()
     }
-}
 
-impl ColorMap for &LinearSegmentedColorMap {
-    type Item = LinearSegmentedColorMap;
-    fn sample(&self, x: f32) -> Vector4<u8> {
+    pub fn sample(&self, x: f32) -> Vector4<u8> {
         let a = self
             .a
             .as_ref()
@@ -385,7 +361,8 @@ impl ColorMap for &LinearSegmentedColorMap {
             (a * 255.) as u8,
         )
     }
-    fn reverse(&self) -> Self::Item {
+
+    pub fn reverse(&self) -> Self {
         let mut r: Vec<_> = self
             .r
             .iter()
@@ -411,10 +388,18 @@ impl ColorMap for &LinearSegmentedColorMap {
         if let Some(a) = &mut a {
             a.reverse();
         }
-        LinearSegmentedColorMap { r, g, b, a }
+        ColorMap { r, g, b, a }
+    }
+
+    pub(crate) fn has_boring_alpha_channel(&self) -> bool {
+        self.a
+            .as_ref()
+            .map(|a| a.iter().all(|(_, _, a)| *a == 1.0))
+            .unwrap_or(true)
     }
 }
-impl Hash for LinearSegmentedColorMap {
+
+impl Hash for ColorMap {
     fn hash<H: Hasher>(&self, state: &mut H) {
         for c in [&self.r, &self.g, &self.b].iter() {
             c.iter().for_each(|(a, b, c)| {
@@ -481,71 +466,6 @@ fn merge_neighbours(values: &mut Vec<(f32, f32, f32)>) {
             }
         } else {
             i += 1;
-        }
-    }
-}
-
-pub const COLORMAP_RESOLUTION: u32 = 256;
-
-#[derive(Debug, Clone, Hash)]
-pub enum GenericColorMap {
-    Listed(ListedColorMap),
-    LinearSegmented(LinearSegmentedColorMap),
-}
-
-impl GenericColorMap {
-    pub fn read<R: Read + Seek>(mut reader: R) -> anyhow::Result<Self> {
-        let mut start = [0; 6];
-        reader.read_exact(&mut start)?;
-        reader.seek(SeekFrom::Start(0))?;
-        if start.eq(b"\x93NUMPY") {
-            // numpy file
-            Ok(GenericColorMap::Listed(ListedColorMap::from_npy(reader)?))
-        } else {
-            // json file
-            Ok(GenericColorMap::LinearSegmented(
-                LinearSegmentedColorMap::from_json(reader)?,
-            ))
-        }
-    }
-
-    pub fn into_linear_segmented(&self, n: u32) -> LinearSegmentedColorMap {
-        match self {
-            crate::cmap::GenericColorMap::Listed(c) => {
-                LinearSegmentedColorMap::from_color_map(c, n)
-            }
-            crate::cmap::GenericColorMap::LinearSegmented(c) => c.clone(),
-        }
-    }
-
-    /// if all alpha values are 1.0, the alpha channel is considered boring
-    #[allow(unused)]
-    pub(crate) fn has_boring_alpha_channel(&self) -> bool {
-        match self {
-            GenericColorMap::Listed(c) => c.0.iter().all(|v| v.w == 255),
-            GenericColorMap::LinearSegmented(c) => {
-                c.a.as_ref()
-                    .map(|a| a.iter().all(|(_, _, a)| *a == 1.0))
-                    .unwrap_or(true)
-            }
-        }
-    }
-}
-
-impl<'a> ColorMap for &'a GenericColorMap {
-    fn sample(&self, x: f32) -> Vector4<u8> {
-        match self {
-            GenericColorMap::Listed(c) => c.sample(x),
-            GenericColorMap::LinearSegmented(c) => c.sample(x),
-        }
-    }
-
-    type Item = GenericColorMap;
-
-    fn reverse(&self) -> Self::Item {
-        match self {
-            GenericColorMap::Listed(c) => GenericColorMap::Listed(c.reverse()),
-            GenericColorMap::LinearSegmented(c) => GenericColorMap::LinearSegmented(c.reverse()),
         }
     }
 }

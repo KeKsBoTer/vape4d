@@ -38,12 +38,12 @@ where
         .colormap
         .map_or(Ok(cmap::COLORMAPS["seaborn"]["icefire"].clone()), |path| {
             let reader = File::open(path)?;
-            cmap::GenericColorMap::read(reader)
+            cmap::ColorMap::read(reader)
         })?;
 
     open_window(
         volume,
-        cmap.into_linear_segmented(cmap::COLORMAP_RESOLUTION),
+        cmap,
         RenderConfig {
             no_vsync: opt.no_vsync,
             ..Default::default()
