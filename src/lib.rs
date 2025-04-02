@@ -2,7 +2,7 @@ use camera::{Camera, OrthographicProjection};
 use cmap::ColorMap;
 use controller::CameraController;
 use egui::FullOutput;
-use renderer::{RenderSettings, VolumeRenderer};
+use renderer::{FrameBuffer, ImageUpscaler, RenderSettings, VolumeRenderer};
 use std::{path::PathBuf, sync::Arc};
 use volume::VolumeGPU;
 #[cfg(target_arch = "wasm32")]
@@ -128,6 +128,8 @@ pub struct WindowContext {
 
     volume: VolumeGPU,
     renderer: VolumeRenderer,
+    frame_buffer: FrameBuffer,
+    display: ImageUpscaler,
 
     render_settings: RenderSettings,
 
@@ -201,20 +203,22 @@ impl WindowContext {
 
         let ui_renderer = ui_renderer::EguiWGPU::new(device, surface_format, &window);
 
-        let renderer = VolumeRenderer::new(device,queue, surface_format);
+        let render_format = wgpu::TextureFormat::Rgba16Float;
+
+        let renderer = VolumeRenderer::new(device, queue, render_format);
+
+        let display = ImageUpscaler::new(device, surface_format);
+
 
         let render_settings = RenderSettings {
-            clipping_aabb: None,
-            time: 0.,
-            step_size: 2. / 1000.,
-            spatial_filter: wgpu::FilterMode::Linear,
-            temporal_filter: wgpu::FilterMode::Linear,
             distance_scale: render_config.distance_scale,
             vmin: render_config.vmin,
             vmax: render_config.vmax,
             gamma_correction: !surface_format.is_srgb(),
             axis_scale: render_config.axis_scale,
-            cmap
+            cmap,
+            render_scale: window.scale_factor() as f32,
+            ..Default::default()
         };
 
         let mut controller = CameraController::new(0.1, 0.05);
@@ -234,6 +238,9 @@ impl WindowContext {
         let num_columns = volume.channels() as u32;
         let volumes_gpu = VolumeGPU::new(device, queue, volume);
 
+        let render_scale = render_settings.render_scale;
+        let frame_buffer = FrameBuffer::new(device, (size.width as f32 /render_scale) as u32, (size.height as f32 /render_scale) as u32, render_format);
+
         Ok(Self {
             wgpu_context,
             scale_factor: window.scale_factor() as f32,
@@ -247,7 +254,9 @@ impl WindowContext {
             camera,
 
             volume: volumes_gpu,
+            display,
             renderer,
+            frame_buffer,
             render_settings,
             animation_duration,
             playing: true,
@@ -281,6 +290,11 @@ impl WindowContext {
             self.camera.projection.resize(new_width, new_height);
             self.surface
                 .configure(&self.wgpu_context.device, &self.config);
+            self.frame_buffer.resize(
+                &self.wgpu_context.device,
+                (new_width as f32 / self.render_settings.render_scale) as u32,
+                (new_height as f32 / self.render_settings.render_scale) as u32,
+            );
         }
         if let Some(scale_factor) = scale_factor {
             if scale_factor > 0. {
@@ -340,8 +354,11 @@ impl WindowContext {
 
         let columns = self.num_columns as usize;
         let rows = (self.volume.volume.channels() as f32 / columns as f32).ceil() as usize;
-        let cell_width = self.config.width as f32 / columns as f32;
-        let cell_height = self.config.height as f32 / rows as f32;
+        let cell_width =
+            (self.config.width as f32 / self.render_settings.render_scale).floor() / columns as f32;
+        let cell_height =
+            (self.config.height as f32 / self.render_settings.render_scale).floor() / rows as f32;
+
 
         let ui_state = shapes.map(|shapes| {
             self.ui_renderer.prepare(
@@ -387,13 +404,38 @@ impl WindowContext {
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("render pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view_rgb,
+                        view: &self.frame_buffer.color().create_view(&Default::default()),
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(self.background_color),
                             store: wgpu::StoreOp::Store,
                         },
-                    })],
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &self.frame_buffer.grad_x().create_view(&Default::default()),
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &self.frame_buffer.grad_y().create_view(&Default::default()),
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &self.frame_buffer.grad_xy().create_view(&Default::default()),
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })
+                    ],
                     ..Default::default()
                 })
                 .forget_lifetime();
@@ -410,8 +452,26 @@ impl WindowContext {
                         1.,
                     );
                 }
-                self.renderer.render(&self.wgpu_context.queue,&mut render_pass, &v);
+                self.renderer
+                    .render(&self.wgpu_context.queue, &mut render_pass, &v);
             }
+        }
+        {
+            let mut render_pass = encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("render pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view_rgb,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(self.background_color),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                })
+                .forget_lifetime();
+            self.display.render(&mut render_pass, &frame_data[0].settings_bg, &self.frame_buffer);
 
             if let Some(state) = &ui_state {
                 // ui rendering

@@ -93,8 +93,16 @@ impl Volume {
     {
         let start = Instant::now();
 
-        let shape: Vec<u64> = array.shape().to_vec();
+        let mut shape: Vec<u64> = array.shape().to_vec();
         log::debug!("size: {:?}", &shape);
+
+        if shape.len() == 3{
+            shape.insert(0,1);
+        }
+        if shape.len() == 4{
+            shape.insert(0,1);
+        }
+        
 
         if shape.len() != 5 {
             anyhow::bail!("unsupported shape: {:?}", shape);

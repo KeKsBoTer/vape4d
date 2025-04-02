@@ -23,7 +23,9 @@ struct Settings {
     distance_scale: f32,
     vmin: f32,
     vmax: f32,
-    gamma_correction: u32
+    gamma_correction: u32,
+    upscaling_method:u32,
+    selected_channel:u32,
 }
 
 
@@ -80,17 +82,24 @@ var volume_sampler: sampler;
 @group(0) @binding(3)
 var<uniform> camera: CameraUniforms;
 
-@group(0) @binding(4)
+@group(1) @binding(0)
 var<uniform> settings: Settings;
 
-@group(1) @binding(0)
+@group(2) @binding(0)
 var cmap : texture_2d<f32>;
-@group(1) @binding(1)
+@group(2) @binding(1)
 var cmap_sampler: sampler;
 
 struct VertexOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) tex_coord: vec2<f32>,
+}
+
+struct FragmentOut {
+    @location(0) color: vec4<f32>,
+    @location(1) grad_x: vec4<f32>,
+    @location(2) grad_y: vec4<f32>,
+    @location(3) grad_xy: vec4<f32>,
 }
 
 @vertex
@@ -118,8 +127,11 @@ fn next_pos(pos: ptr<function,vec3<f32>>, step_size: f32, ray_dir: vec3<f32>) ->
 fn sample_volume(pos: vec3<f32>) -> f32 {
     //  origin is in bottom left corner so we need to flip y 
     let pos_m = vec3<f32>(pos.x, 1. - pos.y, pos.z);
-    let sample_curr = textureSampleLevel(volume, volume_sampler, pos_m, 0.).r;
-    let sample_next = textureSampleLevel(volume_next, volume_sampler, pos_m, 0.).r;
+    let size = textureDimensions(volume);
+    let pos_i = vec3<i32>(pos_m * vec3<f32>(size));
+
+    let sample_curr = textureLoad(volume, pos_i, 0).r;
+    let sample_next = textureSampleLevel(volume_next, pos_i, 0).r;
     if settings.temporal_filter == FILTER_NEAREST {
         return sample_curr;
     } else {
@@ -332,27 +344,140 @@ fn trace_ray(ray_in: Ray,pixel_pos:vec2<f32>) -> vec4<f32> {
     return vec4<f32>(color, 1. - transmittance);
 }
 
-fn gamma_correction(color: vec4<f32>) -> vec4<f32> {
-    return vec4<f32>(pow(color.rgb, vec3<f32>(1. / 2.2)), color.a);
+// traces ray trough volume and returns color
+fn trace_ray_simple(ray_in: Ray,pixel_pos:vec2<f32>,
+    color_out:ptr<function,vec4<f32>>,
+    color_out_dx:ptr<function,vec4<f32>>,
+    color_out_dy:ptr<function,vec4<f32>>,
+    color_out_dxy:ptr<function,vec4<f32>>
+){
+    
+    let aabb = settings.volume_aabb;
+    let aabb_size = aabb.max - aabb.min;
+    var ray = ray_in;
+    let slice_min = settings.clipping.min;
+    let slice_max = settings.clipping.max;
+    // find closest point on volume
+    let aabb_min = (aabb.min + (slice_min * aabb_size)); //  zxy for tensorf alignment
+    let aabb_max = (aabb.max - ((1. - slice_max) * aabb_size)); //  zxy for tensorf alignment
+    let intersec = intersectAABB(ray, aabb_min, aabb_max);
+
+    if intersec.x > intersec.y {
+        return;
+    }
+
+    let start_cam_pos = ray.orig;
+    let start = max(0., intersec.x) + 1e-4;
+    ray.orig += start * ray.dir;
+
+    var iters = 0u;
+    var color = vec4<f32>(0.);
+    var color_dx = vec4<f32>(0.);
+    var color_dy = vec4<f32>(0.);
+    var color_dxy = vec4<f32>(0.);
+
+    let volume_size = textureDimensions(volume);
+
+    var distance_scale = settings.distance_scale;
+
+    var pos = ray.orig;
+
+    let early_stopping_t = 1. / 255.;
+
+    let step_size_g = (settings.step_size);
+    var sample_pos: vec3<f32>;
+    var start_point: vec3<f32>;
+
+    var step_size: f32;
+    loop{
+        step_size = step_size_g;
+        sample_pos = next_pos(&pos, step_size_g, ray.dir);
+
+        let slice_test = any(sample_pos < slice_min) || any(sample_pos > slice_max) ;
+        if slice_test || iters > 10000 {
+            break;
+        }
+
+        let sample = sample_volume(sample_pos.xyz);
+        let color_tf = sample_cmap(sample);
+        
+        // we try to avoid values that are exactly one as this can cause artifacts
+        let sigma = min(color_tf.a,1.-1e-6);
+
+        var sample_color = color_tf.rgb;
+        let a_i = 1. - pow(1. - sigma, step_size * distance_scale);
+        color = blend(color, vec4<f32>(sample_color, a_i));
+        blend_gradient(
+            color,vec4<f32>(1.),vec4<f32>(1.),vec4<f32>(1.),
+            vec4<f32>(sample_color, a_i),vec4<f32>(1.),vec4<f32>(1.),vec4<f32>(1.),
+            &color_dx, &color_dxy, &color_dy,
+        );
+        if color.a > 1.- early_stopping_t {
+            break;
+        }
+        iters += 1u;
+    }
+    *color_out = color;
+    *color_out_dx = color_dx;
+    *color_out_dy = color_dy;
+    *color_out_dxy = color_dxy;
+
 }
+
+
 
 
 @fragment
-fn fs_main(vertex_in: VertexOut) -> @location(0) vec4<f32> {
+fn fs_main(vertex_in: VertexOut) -> FragmentOut {
     let r_pos = vec2<f32>(vertex_in.tex_coord.x, 1. - vertex_in.tex_coord.y);
     let ray = create_ray(camera.view_inv, camera.proj_inv, r_pos);
-    var color = trace_ray(ray,r_pos);
-    if settings.gamma_correction == 1u {
-        color = fromLinear(color);
-    }
-    return color;
+    
+    var color = vec4<f32>(0.);
+    var grad_x = vec4<f32>(0.);
+    var grad_y = vec4<f32>(0.);
+    var grad_xy = vec4<f32>(0.);
+    trace_ray_simple(ray, r_pos, &color, &grad_x, &grad_y, &grad_xy);
+
+    var frag_out: FragmentOut;
+    // frag_out.grad_x = dpdxFine(frag_out.color);
+    // frag_out.grad_y = -dpdyFine(frag_out.color);
+    // frag_out.grad_xy = dpdxFine(frag_out.grad_y);
+
+    frag_out.color = color;
+    frag_out.grad_x = grad_x;
+    frag_out.grad_y = grad_y;
+    frag_out.grad_xy = grad_xy;
+    return frag_out;
 }
 
 
-fn fromLinear(color: vec4<f32>) -> vec4<f32> {
-    let cutoff = color.rgb < vec3<f32>(0.0031308);
-    let higher = vec3<f32>(1.055) * pow(color.rgb, vec3<f32>(1.0 / 2.4)) - 0.055;
-    let lower = color.rgb * 12.92;
+//
+/// generated with sympy
+fn blend(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
 
-    return vec4<f32>(mix(higher, lower, vec3<f32>(cutoff)), color.a);
+    var blend_result:vec4<f32>;
+    blend_result[0] = (1 - a[3])*b[0]*b[3] + a[0];
+    blend_result[1] = (1 - a[3])*b[1]*b[3] + a[1];
+    blend_result[2] = (1 - a[3])*b[2]*b[3] + a[2];
+    blend_result[3] = (1 - a[3])*b[3] + a[3];
+    return blend_result;
+ 
 }
+
+/// generated with sympy
+fn blend_gradient(a: vec4<f32>, a_dx: vec4<f32>, a_dxy: vec4<f32>, a_dy: vec4<f32>, b: vec4<f32>, b_dx: vec4<f32>, b_dxy: vec4<f32>, b_dy: vec4<f32>, dblend_dx: ptr<function,vec4<f32>>, dblend_dxy: ptr<function,vec4<f32>>, dblend_dy: ptr<function,vec4<f32>>) {
+
+    (*dblend_dx)[0] = (1 - a[3])*b[0]*b_dx[3] + (1 - a[3])*b[3]*b_dx[0] + a_dx[0] - a_dx[3]*b[0]*b[3];
+    (*dblend_dx)[1] = (1 - a[3])*b[1]*b_dx[3] + (1 - a[3])*b[3]*b_dx[1] + a_dx[1] - a_dx[3]*b[1]*b[3];
+    (*dblend_dx)[2] = (1 - a[3])*b[2]*b_dx[3] + (1 - a[3])*b[3]*b_dx[2] + a_dx[2] - a_dx[3]*b[2]*b[3];
+    (*dblend_dx)[3] = (1 - a[3])*b_dx[3] - a_dx[3]*b[3] + a_dx[3];
+    (*dblend_dxy)[0] = -(a[3] - 1)*b[0]*b_dxy[3] - (a[3] - 1)*b[3]*b_dxy[0] - (a[3] - 1)*b_dx[0]*b_dy[3] - (a[3] - 1)*b_dx[3]*b_dy[0] - a_dx[3]*b[0]*b_dy[3] - a_dx[3]*b[3]*b_dy[0] + a_dxy[0] - a_dxy[3]*b[0]*b[3] - a_dy[3]*b[0]*b_dx[3] - a_dy[3]*b[3]*b_dx[0];
+    (*dblend_dxy)[1] = -(a[3] - 1)*b[1]*b_dxy[3] - (a[3] - 1)*b[3]*b_dxy[1] - (a[3] - 1)*b_dx[1]*b_dy[3] - (a[3] - 1)*b_dx[3]*b_dy[1] - a_dx[3]*b[1]*b_dy[3] - a_dx[3]*b[3]*b_dy[1] + a_dxy[1] - a_dxy[3]*b[1]*b[3] - a_dy[3]*b[1]*b_dx[3] - a_dy[3]*b[3]*b_dx[1];
+    (*dblend_dxy)[2] = -(a[3] - 1)*b[2]*b_dxy[3] - (a[3] - 1)*b[3]*b_dxy[2] - (a[3] - 1)*b_dx[2]*b_dy[3] - (a[3] - 1)*b_dx[3]*b_dy[2] - a_dx[3]*b[2]*b_dy[3] - a_dx[3]*b[3]*b_dy[2] + a_dxy[2] - a_dxy[3]*b[2]*b[3] - a_dy[3]*b[2]*b_dx[3] - a_dy[3]*b[3]*b_dx[2];
+    (*dblend_dxy)[3] = -(a[3] - 1)*b_dxy[3] - a_dx[3]*b_dy[3] - a_dxy[3]*b[3] + a_dxy[3] - a_dy[3]*b_dx[3];
+    (*dblend_dy)[0] = (1 - a[3])*b[0]*b_dy[3] + (1 - a[3])*b[3]*b_dy[0] + a_dy[0] - a_dy[3]*b[0]*b[3];
+    (*dblend_dy)[1] = (1 - a[3])*b[1]*b_dy[3] + (1 - a[3])*b[3]*b_dy[1] + a_dy[1] - a_dy[3]*b[1]*b[3];
+    (*dblend_dy)[2] = (1 - a[3])*b[2]*b_dy[3] + (1 - a[3])*b[3]*b_dy[2] + a_dy[2] - a_dy[3]*b[2]*b[3];
+    (*dblend_dy)[3] = (1 - a[3])*b_dy[3] - a_dy[3]*b[3] + a_dy[3];
+ 
+ }

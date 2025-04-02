@@ -13,6 +13,7 @@ use crate::cmap::COLORMAPS;
 pub(crate) fn ui(state: &mut WindowContext) -> bool {
     let ctx = state.ui_renderer.winit.egui_ctx();
     let with_animation = state.volume.volume.timesteps() > 1;
+    let render_scale_before = state.render_settings.render_scale;
     egui::Window::new("Render Settings").show(ctx, |ui| {
         egui::Grid::new("render_settings")
             .num_columns(2)
@@ -179,6 +180,56 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                         )
                     });
                 ui.end_row();
+
+                ui.label("Upscaling Method");
+                egui::ComboBox::new("upscaling_method", "")
+                    .selected_text(state.render_settings.upscaling_method.to_string())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut state.render_settings.upscaling_method,
+                            crate::renderer::UpscalingMethod::Nearest,
+                            crate::renderer::UpscalingMethod::Nearest.to_string()
+                        );
+                        ui.selectable_value(
+                            &mut state.render_settings.upscaling_method,
+                            crate::renderer::UpscalingMethod::Bilinear,
+                            crate::renderer::UpscalingMethod::Bilinear.to_string()
+                        );
+                        ui.selectable_value(
+                            &mut state.render_settings.upscaling_method,
+                            crate::renderer::UpscalingMethod::Bicubic,
+                            crate::renderer::UpscalingMethod::Bicubic.to_string()
+                        );
+                        ui.selectable_value(
+                            &mut state.render_settings.upscaling_method,
+                            crate::renderer::UpscalingMethod::Spline,
+                            crate::renderer::UpscalingMethod::Spline.to_string()
+                        );
+                    });
+                ui.end_row();
+                if state.render_settings.upscaling_method == crate::renderer::UpscalingMethod::Spline {
+                    ui.label("Framebuffer Channel");
+                    egui::ComboBox::new("selected_channel_fb", "")
+                        .selected_text(
+                            state
+                                .render_settings.selected_channel.to_string()
+                        )
+                        .show_ui(ui, |ui| {
+                            for i in 0..4 {
+                                ui.selectable_value(
+                                    &mut state.render_settings.selected_channel,
+                                    i,
+                                    format!("{}", i),
+                                );
+                            }
+                        });
+                    ui.end_row();  
+                }
+                ui.label("Render Scale");
+                ui.add(egui::DragValue::new(&mut state.render_settings.render_scale)
+                    .speed(0.1)
+                    .range((1.)..=(16.))
+                    .clamp_existing_to_range(true));
             });
     });
 
@@ -462,6 +513,12 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
             }
         });
 
+    if render_scale_before != state.render_settings.render_scale {
+        state.frame_buffer.resize(&state.wgpu_context.device, 
+            (state.config.width as f32 / state.render_settings.render_scale) as u32,
+            (state.config.height as f32 / state.render_settings.render_scale) as u32
+        );
+    }
 
     let repaint = ctx.has_requested_repaint();
     return repaint;
