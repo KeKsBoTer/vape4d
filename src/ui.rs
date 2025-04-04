@@ -2,6 +2,7 @@ use std::{f32::consts::PI, ops::RangeInclusive, time::Duration};
 
 use egui::{emath::Numeric, epaint::TextShape, vec2};
 use egui_plot::{Plot, PlotImage, PlotPoint};
+use egui_probe::EguiProbe;
 
 use crate::{
     cmap::{ColorMap, COLORMAP_RESOLUTION},
@@ -64,21 +65,21 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     .on_hover_text("Scale the volume in x, y and z direction");
                 ui.horizontal(|ui| {
                     ui.add(
-                        egui::DragValue::new(&mut state.render_settings.axis_scale.x)
+                        egui::DragValue::new(&mut state.render_settings.axis_scale[0])
                             .speed(0.01)
                             .range(RangeInclusive::new(1., 1e2))
                             .clamp_existing_to_range(true)
                             .suffix("x"),
                     );
                     ui.add(
-                        egui::DragValue::new(&mut state.render_settings.axis_scale.y)
+                        egui::DragValue::new(&mut state.render_settings.axis_scale[1])
                             .speed(0.01)
                             .range(RangeInclusive::new(1., 1e2))
                             .clamp_existing_to_range(true)
                             .suffix("y"),
                     );
                     ui.add(
-                        egui::DragValue::new(&mut state.render_settings.axis_scale.z)
+                        egui::DragValue::new(&mut state.render_settings.axis_scale[2])
                             .speed(0.01)
                             .range(RangeInclusive::new(1., 1e2))
                             .clamp_existing_to_range(true)
@@ -205,6 +206,11 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                             crate::renderer::UpscalingMethod::Spline,
                             crate::renderer::UpscalingMethod::Spline.to_string()
                         );
+                        ui.selectable_value(
+                            &mut state.render_settings.upscaling_method,
+                            crate::renderer::UpscalingMethod::Lanczos,
+                            crate::renderer::UpscalingMethod::Lanczos.to_string()
+                        );
                     });
                 ui.end_row();
                 if state.render_settings.upscaling_method == crate::renderer::UpscalingMethod::Spline {
@@ -224,8 +230,10 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                             }
                         });
                     ui.end_row();  
+                }else{
+                    state.render_settings.selected_channel = 0;
                 }
-                ui.label("Render Scale");
+                ui.label("Render Scale").on_hover_text("Render at reduced resolution and upscale to screen resolution");
                 ui.add(egui::DragValue::new(&mut state.render_settings.render_scale)
                     .speed(0.1)
                     .range((1.)..=(16.))
@@ -463,6 +471,18 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
             });
             });
     }
+
+    egui::Window::new("Debug").default_open(false).scroll(true).show(ctx, |ui| {
+        ui.collapsing("Render Settings",|ui|{
+            egui_probe::Probe::new(&mut state.render_settings)
+                .show(ui);  
+        });
+        ui.collapsing("Camera",|ui|{
+            egui_probe::Probe::new(&mut state.camera)
+            .show(ui);  
+        });
+
+    });
 
     let frame_rect = ctx.available_rect();
     egui::Area::new(egui::Id::new("orientation"))

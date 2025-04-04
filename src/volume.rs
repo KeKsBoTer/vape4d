@@ -1,5 +1,6 @@
 use bytemuck::Zeroable;
 use cgmath::{BaseNum, EuclideanSpace, MetricSpace, One, Point3, Vector3};
+use egui_probe::EguiProbe;
 use half::f16;
 use ndarray::{Array5, ArrayViewD, Axis, Ix5, StrideShape};
 use npyz::{npz, Deserialize, NpyFile};
@@ -268,5 +269,22 @@ impl<F: Float + BaseNum> Aabb<F> {
 
     pub fn size(&self) -> Vector3<F> {
         self.max - self.min
+    }
+}
+
+impl EguiProbe for Aabb<f32> {
+    fn probe(&mut self, ui: &mut egui::Ui, _style: &egui_probe::Style) -> egui::Response {
+        ui.collapsing("AABB", |ui| {
+            ui.collapsing("min", |ui|{
+                ui.add(egui::DragValue::new(&mut self.min.x));
+                ui.add(egui::DragValue::new(&mut self.min.y));
+                ui.add(egui::DragValue::new(&mut self.min.z));
+            });
+            ui.collapsing("max", |ui|{
+                ui.add(egui::DragValue::new(&mut self.min.x));
+                ui.add(egui::DragValue::new(&mut self.min.y));
+                ui.add(egui::DragValue::new(&mut self.min.z));
+            });
+        }).header_response
     }
 }

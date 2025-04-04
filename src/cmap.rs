@@ -279,6 +279,7 @@ pub struct ColorMap {
     pub a: Option<Vec<(f32, f32, f32)>>,
 }
 
+
 impl ColorMap {
     pub fn new(
         r: Vec<(f32, f32, f32)>,

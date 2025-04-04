@@ -5,10 +5,13 @@ use crate::volume::Aabb;
 pub type PerspectiveCamera = Camera<PerspectiveProjection>;
 pub type OrthographicCamera = Camera<OrthographicProjection>;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq,egui_probe::EguiProbe)]
 pub struct Camera<P: Projection> {
+    #[egui_probe(skip)]
     pub position: Point3<f32>,
+    #[egui_probe(skip)]
     pub rotation: Quaternion<f32>,
+    #[egui_probe(skip)]
     pub projection: P,
 }
 impl<P: Projection> Camera<P> {
@@ -172,9 +175,10 @@ impl Projection for OrthographicProjection {
         let mut p = Matrix4::zero();
         p[0][0] = 1. / right;
         p[1][1] = 1. / top;
-        p[2][2] = -2.0 / (self.zfar - self.znear);
-        p[2][3] = -(self.zfar + self.znear) / (self.zfar - self.znear);
+        p[2][2] = 1.0 / (self.zfar - self.znear);
+        p[2][3] = -self.znear / (self.zfar - self.znear);
         p[3][3] = 1.0;
         return p.transpose();
     }
 }
+

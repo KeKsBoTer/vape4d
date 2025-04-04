@@ -11,6 +11,7 @@ const INTERPOLATION_NEAREST:u32 = 0u;
 const INTERPOLATION_BILINEAR:u32 = 1u;
 const INTERPOLATION_BICUBIC:u32 = 2u;
 const INTERPOLATION_SPLINE:u32 = 3u;
+const INTERPOLATION_LANCZOS:u32 = 4u;
 
 
 struct Aabb {
@@ -150,8 +151,8 @@ fn sample_spline(pos_in:vec2<f32>)->vec4<f32>{
 
             let z_v = textureLoad(colorBuffer, sample_pos,0);
             let dx_v = textureLoad(gradientBuffer_x, sample_pos,0);
-            let dy_v = -textureLoad(gradientBuffer_y, sample_pos,0);
-            let dxy_v = -textureLoad(gradientBuffer_xy, sample_pos,0);
+            let dy_v = textureLoad(gradientBuffer_y, sample_pos,0);
+            let dxy_v = textureLoad(gradientBuffer_xy, sample_pos,0);
 
             for (var c = 0u; c < 4u; c++) {
                 z[c][i][j] = z_v[c];
@@ -169,6 +170,43 @@ fn sample_spline(pos_in:vec2<f32>)->vec4<f32>{
         spline_interp(z[2], dx[2], dy[2], dxy[2], vec2<f32>(p_frac.y, p_frac.x)),
         spline_interp(z[3], dx[3], dy[3], dxy[3], vec2<f32>(p_frac.y, p_frac.x))
     ); 
+}
+
+
+fn sample_lanczos(pos_in:vec2<f32>)->vec4<f32>{
+    let tex_size = vec2<f32>(textureDimensions(colorBuffer));
+    let pos = pos_in*(tex_size);
+    let pixel_pos = vec2<i32>(pos);
+    const kernel_size = 3; // Lanczos kernel size
+    let a = f32(kernel_size);
+    var color = vec4<f32>(0.0);
+    var weight_sum = 0.0;
+
+    for (var i = -kernel_size; i <= kernel_size; i++) {
+        for (var j = -kernel_size; j <= kernel_size; j++) {
+            let sample_pos = pixel_pos + vec2<i32>(i, j);
+            let sample_pos_clamped = clamp(sample_pos, vec2<i32>(0), vec2<i32>(tex_size - 1));
+            let z = textureLoad(colorBuffer, sample_pos_clamped, 0);
+
+            let dx = f32(i) - fract(pos.x);
+            let dy = f32(j) - fract(pos.y);
+
+            var lanczos_x = 1.0;
+            if dx != 0.0 {
+                lanczos_x = a * sin(PI * dx) * sin(PI * dx / a) / (PI * PI * dx * dx);
+            }
+            var lanczos_y = 1.0;
+            if dy != 0.0{
+                lanczos_y = a * sin(PI * dy) * sin(PI * dy / a) / (PI * PI * dy * dy);
+            }
+
+            let weight = lanczos_x * lanczos_y;
+            color += z * weight;
+            weight_sum += weight;
+        }
+    }
+
+    return color / weight_sum;
 }
 
 
@@ -193,6 +231,9 @@ fn fs_main(vertex_in: VertexOut) -> @location(0) vec4<f32>
                 }
                 case INTERPOLATION_SPLINE:{
                     color = sample_spline(vertex_in.tex_coord);
+                }
+                case INTERPOLATION_LANCZOS:{
+                    color = sample_lanczos(vertex_in.tex_coord);
                 }
                 default:{
                     color = sample_nearest(vertex_in.tex_coord);

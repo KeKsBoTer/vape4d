@@ -119,7 +119,7 @@ pub async fn render_volume(
                 distance_scale,
                 spatial_filter: spatial_interpolation,
                 temporal_filter: temporal_interpolation,
-                axis_scale: axis_scale.unwrap_or(Vector3::new(1., 1., 1.)),
+                axis_scale: axis_scale.unwrap_or(Vector3::new(1., 1., 1.)).into(),
                 cmap:cmap.clone(),
                 ..Default::default()
             },

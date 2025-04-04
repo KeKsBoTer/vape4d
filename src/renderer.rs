@@ -3,7 +3,7 @@ use crate::{
     cmap::{ColorMap, ColorMapGPU, COLORMAPS, COLORMAP_RESOLUTION},
     volume::{Aabb, Volume, VolumeGPU},
 };
-
+use egui_probe::{EguiProbe, Probe, angle};
 use cgmath::{ElementWise, EuclideanSpace, Matrix4, SquareMatrix, Vector3, Vector4, Zero};
 use wgpu::{include_wgsl, util::DeviceExt};
 
@@ -307,18 +307,22 @@ impl<P: Projection> From<&Camera<P>> for CameraUniform {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone,EguiProbe)]
 pub struct RenderSettings {
+    #[egui_probe(skip)]
     pub clipping_aabb: Option<Aabb<f32>>,
     pub time: f32,
     pub step_size: f32,
+    #[egui_probe(skip)]
     pub spatial_filter: wgpu::FilterMode,
+    #[egui_probe(skip)]
     pub temporal_filter: wgpu::FilterMode,
     pub distance_scale: f32,
     pub vmin: Option<f32>,
     pub vmax: Option<f32>,
     pub gamma_correction: bool,
-    pub axis_scale: Vector3<f32>,
+    pub axis_scale: [f32;3],
+    #[egui_probe(skip)]
     pub cmap: ColorMap,
     pub render_scale: f32,
     pub upscaling_method: UpscalingMethod,
@@ -337,10 +341,10 @@ impl Default for RenderSettings {
             vmin: None,
             vmax: None,
             gamma_correction: false,
-            axis_scale: Vector3::new(1.0, 1.0, 1.0),
+            axis_scale: [1.0, 1.0, 1.0],
             cmap: default_cmap(),
             render_scale:1.0,
-            upscaling_method: UpscalingMethod::Bicubic,
+            upscaling_method: UpscalingMethod::Spline,
             selected_channel: 0,
         }
     }
@@ -385,7 +389,7 @@ pub struct RenderSettingsUniform {
 impl RenderSettingsUniform {
     pub fn from_settings(settings: &RenderSettings, volume: &Volume) -> Self {
         let volume_aabb = volume.aabb;
-        let aabb_size = settings.axis_scale.mul_element_wise(volume_aabb.size());
+        let aabb_size = Vector3::from(settings.axis_scale).mul_element_wise(volume_aabb.size());
         let aabb_min = volume_aabb.center() - aabb_size / 2.;
         let aabb_max = volume_aabb.center() + aabb_size / 2.;
 
@@ -633,13 +637,14 @@ impl FrameBuffer {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, EguiProbe)]
 #[repr(u32)]
 pub enum UpscalingMethod {
     Nearest = 0,
     Bilinear = 1,
     Bicubic = 2,
     Spline = 3,
+    Lanczos = 4,
 }
 
 impl std::fmt::Display for UpscalingMethod {
@@ -649,6 +654,7 @@ impl std::fmt::Display for UpscalingMethod {
             UpscalingMethod::Bilinear => write!(f, "Bilinear"),
             UpscalingMethod::Bicubic => write!(f, "Bicubic"),
             UpscalingMethod::Spline => write!(f, "Spline"),
+            UpscalingMethod::Lanczos => write!(f, "Lanczos"),
         }
     }
 }
@@ -662,6 +668,7 @@ impl TryFrom<u32> for UpscalingMethod {
             1 => Ok(UpscalingMethod::Bilinear),
             2 => Ok(UpscalingMethod::Bicubic),
             3 => Ok(UpscalingMethod::Spline),
+            4 => Ok(UpscalingMethod::Lanczos),
             _ => Err(anyhow::anyhow!(
                 "Invalid value for UpscalingMethod: {}",
                 value

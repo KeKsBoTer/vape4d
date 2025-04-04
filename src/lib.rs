@@ -18,7 +18,7 @@ mod web;
 #[cfg(target_arch = "wasm32")]
 pub use web::*;
 
-use cgmath::{Vector2, Vector3};
+use cgmath::{One, Point3, Quaternion, Vector2, Vector3, Zero};
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
@@ -215,7 +215,7 @@ impl WindowContext {
             vmin: render_config.vmin,
             vmax: render_config.vmax,
             gamma_correction: !surface_format.is_srgb(),
-            axis_scale: render_config.axis_scale,
+            axis_scale: render_config.axis_scale.into(),
             cmap,
             render_scale: window.scale_factor() as f32,
             ..Default::default()
@@ -226,10 +226,12 @@ impl WindowContext {
 
         let radius = volume.aabb.radius();
         let ratio = size.width as f32 / size.height as f32;
-        let camera = Camera::new_aabb_iso(
-            volume.aabb.clone(),
-            OrthographicProjection::new(Vector2::new(ratio, 1.) * 2. * radius, 1e-4, 100.),
-        );
+        // let camera = Camera::new_aabb_iso(
+        //     volume.aabb.clone(),
+        //     OrthographicProjection::new(Vector2::new(ratio, 1.) * 2. * radius, 1e-4, 10.),
+        // );
+        let camera = Camera::new(Point3::new(0.,1.,-2.), Quaternion::one(), 
+        OrthographicProjection::new(Vector2::new(ratio, 1.) * 2. * radius, 1e-4, 10.),);
 
         let animation_duration = render_config
             .duration
