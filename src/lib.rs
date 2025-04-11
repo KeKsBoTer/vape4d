@@ -18,7 +18,7 @@ mod web;
 #[cfg(target_arch = "wasm32")]
 pub use web::*;
 
-use cgmath::{One, Point3, Quaternion, Vector2, Vector3, Zero};
+use cgmath::{One, Point3, Quaternion, Vector2, Vector3};
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
@@ -120,7 +120,7 @@ pub struct WindowContext {
     scale_factor: f32,
 
     controller: CameraController,
-    camera: Camera<OrthographicProjection>,
+    camera: Camera,
     ui_renderer: ui_renderer::EguiWGPU,
     ui_visible: bool,
 
@@ -209,7 +209,6 @@ impl WindowContext {
 
         let display = ImageUpscaler::new(device, surface_format);
 
-
         let render_settings = RenderSettings {
             distance_scale: render_config.distance_scale,
             vmin: render_config.vmin,
@@ -217,7 +216,7 @@ impl WindowContext {
             gamma_correction: !surface_format.is_srgb(),
             axis_scale: render_config.axis_scale.into(),
             cmap,
-            render_scale: window.scale_factor() as f32,
+            render_scale: 8., //window.scale_factor() as f32,
             ..Default::default()
         };
 
@@ -230,8 +229,15 @@ impl WindowContext {
         //     volume.aabb.clone(),
         //     OrthographicProjection::new(Vector2::new(ratio, 1.) * 2. * radius, 1e-4, 10.),
         // );
-        let camera = Camera::new(Point3::new(0.,1.,-2.), Quaternion::one(), 
-        OrthographicProjection::new(Vector2::new(ratio, 1.) * 2. * radius, 1e-4, 10.),);
+        let camera = Camera::new(
+            Point3::new(0., 1., -2.),
+            Quaternion::one(),
+            camera::Projection::Orthographic(OrthographicProjection::new(
+                Vector2::new(ratio, 1.) * 2. * radius,
+                1e-4,
+                10.,
+            )),
+        );
 
         let animation_duration = render_config
             .duration
@@ -241,7 +247,12 @@ impl WindowContext {
         let volumes_gpu = VolumeGPU::new(device, queue, volume);
 
         let render_scale = render_settings.render_scale;
-        let frame_buffer = FrameBuffer::new(device, (size.width as f32 /render_scale) as u32, (size.height as f32 /render_scale) as u32, render_format);
+        let frame_buffer = FrameBuffer::new(
+            device,
+            (size.width as f32 / render_scale) as u32,
+            (size.height as f32 / render_scale) as u32,
+            render_format,
+        );
 
         Ok(Self {
             wgpu_context,
@@ -263,7 +274,7 @@ impl WindowContext {
             animation_duration,
             playing: true,
             num_columns,
-            selected_channel: None,
+            selected_channel: Some(0),
             colormap_editor_visible: render_config.show_colormap_editor,
 
             cmap_select_visible: render_config.show_cmap_select,
@@ -361,7 +372,6 @@ impl WindowContext {
         let cell_height =
             (self.config.height as f32 / self.render_settings.render_scale).floor() / rows as f32;
 
-
         let ui_state = shapes.map(|shapes| {
             self.ui_renderer.prepare(
                 PhysicalSize {
@@ -405,38 +415,39 @@ impl WindowContext {
             let mut render_pass = encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("render pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self.frame_buffer.color().create_view(&Default::default()),
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(self.background_color),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    }),
-                    Some(wgpu::RenderPassColorAttachment {
-                        view: &self.frame_buffer.grad_x().create_view(&Default::default()),
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    }),
-                    Some(wgpu::RenderPassColorAttachment {
-                        view: &self.frame_buffer.grad_y().create_view(&Default::default()),
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    }),
-                    Some(wgpu::RenderPassColorAttachment {
-                        view: &self.frame_buffer.grad_xy().create_view(&Default::default()),
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })
+                    color_attachments: &[
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: &self.frame_buffer.color().create_view(&Default::default()),
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        }),
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: &self.frame_buffer.grad_x().create_view(&Default::default()),
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        }),
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: &self.frame_buffer.grad_y().create_view(&Default::default()),
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        }),
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: &self.frame_buffer.grad_xy().create_view(&Default::default()),
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        }),
                     ],
                     ..Default::default()
                 })
@@ -473,7 +484,11 @@ impl WindowContext {
                     ..Default::default()
                 })
                 .forget_lifetime();
-            self.display.render(&mut render_pass, &frame_data[0].settings_bg, &self.frame_buffer);
+            self.display.render(
+                &mut render_pass,
+                &frame_data[0].settings_bg,
+                &self.frame_buffer,
+            );
 
             if let Some(state) = &ui_state {
                 // ui rendering

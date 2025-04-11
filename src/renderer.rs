@@ -1,9 +1,9 @@
 use crate::{
-    camera::{Camera, Projection, VIEWPORT_Y_FLIP},
+    camera::{Camera, VIEWPORT_Y_FLIP},
     cmap::{ColorMap, ColorMapGPU, COLORMAPS, COLORMAP_RESOLUTION},
     volume::{Aabb, Volume, VolumeGPU},
 };
-use egui_probe::{EguiProbe, Probe, angle};
+use egui_probe::EguiProbe;
 use cgmath::{ElementWise, EuclideanSpace, Matrix4, SquareMatrix, Vector3, Vector4, Zero};
 use wgpu::{include_wgsl, util::DeviceExt};
 
@@ -86,6 +86,7 @@ impl VolumeRenderer {
             label: Some("volume sampler"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
+
             ..Default::default()
         });
         let sampler_nearest = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -107,11 +108,11 @@ impl VolumeRenderer {
         }
     }
 
-    pub fn prepare<'a, P: Projection>(
+    pub fn prepare<'a>(
         &mut self,
         device: &wgpu::Device,
         volume: &VolumeGPU,
-        camera: &Camera<P>,
+        camera: &Camera,
         render_settings: &RenderSettings,
         channel: usize,
     ) -> PerFrameData {
@@ -293,14 +294,14 @@ impl CameraUniform {
         self.proj_inv_matrix = proj_matrix.invert().unwrap();
     }
 
-    pub fn set_camera(&mut self, camera: &Camera<impl Projection>) {
-        self.set_proj_mat(camera.proj_matrix());
+    pub fn set_camera(&mut self, camera: &Camera) {
+        self.set_proj_mat(camera.projection.projection_matrix());
         self.set_view_mat(camera.view_matrix());
     }
 }
 
-impl<P: Projection> From<&Camera<P>> for CameraUniform {
-    fn from(camera: &Camera<P>) -> Self {
+impl  From<&Camera> for CameraUniform {
+    fn from(camera: &Camera) -> Self {
         let mut uniform = CameraUniform::default();
         uniform.set_camera(camera);
         uniform
@@ -327,6 +328,9 @@ pub struct RenderSettings {
     pub render_scale: f32,
     pub upscaling_method: UpscalingMethod,
     pub selected_channel: u32,
+    pub hardware_interpolation: bool,
+    pub clamp_gradients:bool,
+    pub gradient_vis_scale: f32,
 }
 
 impl Default for RenderSettings {
@@ -346,6 +350,9 @@ impl Default for RenderSettings {
             render_scale:1.0,
             upscaling_method: UpscalingMethod::Spline,
             selected_channel: 0,
+            hardware_interpolation: true,
+            clamp_gradients:true,
+            gradient_vis_scale: 1.0,
         }
     }
 }
@@ -383,7 +390,10 @@ pub struct RenderSettingsUniform {
 
     upscaling_method: UpscalingMethod,
     selected_channel: u32,
-    _pad: [u32; 2],
+    hardware_interpolation: u32,
+    clamp_gradients: u32,
+    gradient_vis_scale: f32,
+    _pad: [u32; 3],
 }
 
 impl RenderSettingsUniform {
@@ -414,7 +424,10 @@ impl RenderSettingsUniform {
             gamma_correction: settings.gamma_correction as u32,
             upscaling_method:settings.upscaling_method,
             selected_channel: settings.selected_channel,
-            _pad: [0; 2],
+            hardware_interpolation: settings.hardware_interpolation as u32,
+            clamp_gradients: settings.clamp_gradients as u32,
+            gradient_vis_scale: settings.gradient_vis_scale,
+            _pad: [0; 3],
         }
     }
     
@@ -454,7 +467,10 @@ impl Default for RenderSettingsUniform {
             gamma_correction: 0,
             upscaling_method: UpscalingMethod::Bicubic,
             selected_channel:0,
-            _pad: [0; 2],
+            hardware_interpolation: true as u32,
+            clamp_gradients: true as u32,
+            gradient_vis_scale: 1.0,
+            _pad: [0; 3],
         }
     }
 }

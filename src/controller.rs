@@ -8,9 +8,9 @@ use web_time::Duration;
 
 use winit::keyboard::KeyCode;
 
-use crate::camera::{Camera, OrthographicProjection};
+use crate::camera::{Camera, Projection};
 
-#[derive(Debug)]
+#[derive(Debug,egui_probe::EguiProbe)]
 pub struct CameraController {
     pub center: Point3<f32>,
     pub up: Option<Vector3<f32>>,
@@ -21,10 +21,33 @@ pub struct CameraController {
     pub speed: f32,
     pub sensitivity: f32,
 
+    #[egui_probe(skip)]
     pub left_mouse_pressed: bool,
+    #[egui_probe(skip)]
     pub right_mouse_pressed: bool,
+    #[egui_probe(skip)]
     pub alt_pressed: bool,
+    #[egui_probe(skip)]
     pub user_input: bool,
+}
+
+impl Default for CameraController {
+    fn default() -> Self {
+        Self {
+            center: Point3::origin(),
+            amount: Vector3::zero(),
+            shift: Vector2::zero(),
+            rotation: Vector3::zero(),
+            up: None,
+            scroll: 0.0,
+            speed: 1.0,
+            sensitivity: 1.0,
+            left_mouse_pressed: false,
+            right_mouse_pressed: false,
+            alt_pressed: false,
+            user_input: false,
+        }
+    }
 }
 
 impl CameraController {
@@ -104,14 +127,19 @@ impl CameraController {
         self.user_input = true;
     }
 
-    pub fn update_camera(&mut self, camera: &mut Camera<OrthographicProjection>, dt: Duration) {
+    pub fn update_camera(&mut self, camera: &mut Camera, dt: Duration) {
+        let mut projection = match camera.projection {
+            Projection::Orthographic(p) => p,
+            _ => unimplemented!("CameraController only supports Orthographic projection"),
+        };
         let dt: f32 = dt.as_secs_f32();
         let dir = camera.position - self.center;
         let distance = dir.magnitude();
 
-        let scale = camera.projection.viewport.magnitude();
+        let scale = projection.viewport.magnitude();
         let new_scale = (scale.ln() + self.scroll * dt * 10. * self.speed).exp();
-        camera.projection.viewport = camera.projection.viewport.normalize() * new_scale;
+        projection.viewport = projection.viewport.normalize() * new_scale;
+        camera.projection = Projection::Orthographic(projection);
 
         let view_t: Matrix3<f32> = camera.rotation.invert().into();
 

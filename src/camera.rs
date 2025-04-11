@@ -2,20 +2,17 @@ use cgmath::*;
 
 use crate::volume::Aabb;
 
-pub type PerspectiveCamera = Camera<PerspectiveProjection>;
-pub type OrthographicCamera = Camera<OrthographicProjection>;
-
 #[derive(Debug, Clone, Copy, PartialEq,egui_probe::EguiProbe)]
-pub struct Camera<P: Projection> {
-    #[egui_probe(skip)]
+pub struct Camera {
     pub position: Point3<f32>,
-    #[egui_probe(skip)]
     pub rotation: Quaternion<f32>,
-    #[egui_probe(skip)]
-    pub projection: P,
+    pub projection: Projection,
 }
-impl<P: Projection> Camera<P> {
-    pub fn new(position: Point3<f32>, rotation: Quaternion<f32>, projection: P) -> Self {
+
+
+
+impl Camera {
+    pub fn new(position: Point3<f32>, rotation: Quaternion<f32>, projection: Projection) -> Self {
         Camera {
             position,
             rotation,
@@ -23,7 +20,7 @@ impl<P: Projection> Camera<P> {
         }
     }
 
-    pub fn new_aabb_iso(aabb: Aabb<f32>, projection: P) -> Self {
+    pub fn new_aabb_iso(aabb: Aabb<f32>, projection: Projection) -> Self {
         let r = aabb.radius();
         let corner = vec3(1., -1., 1.);
         let view_dir = Quaternion::look_at(-corner, Vector3::unit_y());
@@ -37,29 +34,32 @@ impl<P: Projection> Camera<P> {
     pub fn view_matrix(&self) -> Matrix4<f32> {
         world2view(self.rotation, self.position)
     }
-
-    pub fn proj_matrix(&self) -> Matrix4<f32> {
-        self.projection.projection_matrix()
-    }
 }
 
-impl Default for PerspectiveCamera {
-    fn default() -> Self {
-        Self {
-            position: Point3::new(0., 0., -1.),
-            rotation: Quaternion::new(1., 0., 0., 0.),
-            projection: PerspectiveProjection {
-                fovy: Deg(45.).into(),
-                fovx: Deg(45.).into(),
-                znear: 0.1,
-                zfar: 100.,
-                aspect_ratio: 1.0,
-            },
+
+#[derive(Debug, Clone, Copy, PartialEq,egui_probe::EguiProbe)]
+pub enum Projection {
+    Perspective(PerspectiveProjection),
+    Orthographic(OrthographicProjection),
+}
+
+impl Projection {
+    pub fn resize(&mut self, width: u32, height: u32) {
+        match self {
+            Projection::Perspective(p) => p.resize(width, height),
+            Projection::Orthographic(p) => p.resize(width, height),
+        }
+    }
+
+    pub fn projection_matrix(&self) -> Matrix4<f32> {
+        match self {
+            Projection::Perspective(p) => p.projection_matrix(),
+            Projection::Orthographic(p) => p.projection_matrix(),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq,egui_probe::EguiProbe)]
 pub struct PerspectiveProjection {
     pub fovy: Rad<f32>,
     pub fovx: Rad<f32>,
@@ -68,9 +68,15 @@ pub struct PerspectiveProjection {
     pub aspect_ratio: f32,
 }
 
-impl Projection for PerspectiveProjection {
-    fn projection_matrix(&self) -> Matrix4<f32> {
-        build_proj(self.znear, self.zfar, self.fovx, self.fovy)
+impl Default for PerspectiveProjection {
+    fn default() -> Self {
+        Self {
+            fovy: Deg(45.).into(),
+            fovx: Deg(45.).into(),
+            znear: 0.1,
+            zfar: 100.,
+            aspect_ratio: 1.0,
+        }
     }
 }
 
@@ -104,11 +110,12 @@ impl PerspectiveProjection {
         }
         self.aspect_ratio = ratio;
     }
+
+    fn projection_matrix(&self) -> Matrix4<f32> {
+        build_proj(self.znear, self.zfar, self.fovx, self.fovy)
+    }
 }
 
-pub trait Projection {
-    fn projection_matrix(&self) -> Matrix4<f32>;
-}
 
 pub fn world2view(r: impl Into<Matrix3<f32>>, t: Point3<f32>) -> Matrix4<f32> {
     let mut rt = Matrix4::from(r.into());
@@ -139,11 +146,21 @@ pub fn build_proj(znear: f32, zfar: f32, fov_x: Rad<f32>, fov_y: Rad<f32>) -> Ma
     return p.transpose();
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq,egui_probe::EguiProbe)]
 pub struct OrthographicProjection {
     pub znear: f32,
     pub zfar: f32,
     pub viewport: Vector2<f32>,
+}
+
+impl Default for OrthographicProjection {
+    fn default() -> Self {
+        Self {
+            znear: 0.1,
+            zfar: 100.,
+            viewport: Vector2::new(1., 1.),
+        }
+    }
 }
 
 impl OrthographicProjection {
@@ -164,9 +181,7 @@ impl OrthographicProjection {
             self.viewport.y = self.viewport.x / ratio;
         }
     }
-}
 
-impl Projection for OrthographicProjection {
     fn projection_matrix(&self) -> Matrix4<f32> {
         let width = self.viewport.x;
         let right = width / 2.;
@@ -181,4 +196,3 @@ impl Projection for OrthographicProjection {
         return p.transpose();
     }
 }
-

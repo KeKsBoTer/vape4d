@@ -35,6 +35,9 @@ struct Settings {
     
     upscaling_method:u32,
     selected_channel:u32,
+    hardware_interpolation:u32,
+    clamp_gradients:u32,
+    gradient_vis_scale:f32,
 }
 
 
@@ -78,8 +81,8 @@ fn sample_nearest(pos_in:vec2<f32>)->vec4<f32>{
 fn sample_bilinear(pos_in:vec2<f32>)->vec4<f32>{
     let tex_size = vec2<f32>(textureDimensions(colorBuffer));
 
-    let pos = pos_in*(tex_size);
-    let pixel_pos = vec2<i32>(pos);
+    let pos = pos_in*tex_size - 0.5;
+    let pixel_pos = vec2<i32>(floor(pos));
     let p_frac = fract(pos);
 
     let z00 = textureLoad(colorBuffer, pixel_pos,0);
@@ -98,8 +101,8 @@ fn sample_bilinear(pos_in:vec2<f32>)->vec4<f32>{
 fn sample_bicubic(pos_in:vec2<f32>)->vec4<f32>{
     let tex_size = vec2<f32>(textureDimensions(colorBuffer));
 
-    let pos = pos_in*(tex_size);
-    let pixel_pos = vec2<i32>(pos);
+    let pos = pos_in * tex_size-0.5;
+    let pixel_pos = vec2<i32>(floor(pos));
     let p_frac = fract(pos);
     var z:  array<mat2x2<f32>,4>;
     var dx: array<mat2x2<f32>,4>;
@@ -108,19 +111,37 @@ fn sample_bicubic(pos_in:vec2<f32>)->vec4<f32>{
 
     for (var i = 0; i < 2; i++) {
         for (var j = 0; j < 2; j++) {
-            let sample_pos = clamp(pixel_pos + vec2<i32>(i, j), vec2<i32>(0), vec2<i32>(tex_size-1));
+            let sample_pos = pixel_pos + vec2<i32>(i, j);
 
-            let z_v = textureLoad(colorBuffer, sample_pos,0);
-            let z_up = textureLoad(colorBuffer, clamp(sample_pos + vec2<i32>(0, 1), vec2<i32>(0), vec2<i32>(tex_size-1)),0);
-            let z_left = textureLoad(colorBuffer, clamp(sample_pos + vec2<i32>(-1, 0), vec2<i32>(0), vec2<i32>(tex_size-1)),0);
-            let z_right = textureLoad(colorBuffer, clamp(sample_pos + vec2<i32>(1, 0), vec2<i32>(0), vec2<i32>(tex_size-1)),0);
-            let z_down = textureLoad(colorBuffer, clamp(sample_pos + vec2<i32>(0, -1), vec2<i32>(0), vec2<i32>(tex_size-1)),0);
+            var z_v = textureLoad(colorBuffer, sample_pos,0);
+            
+            var z_left_down = textureLoad(colorBuffer, sample_pos+vec2<i32>(-1,-1),0);
+            var z_left_mid = textureLoad(colorBuffer, sample_pos+vec2<i32>(-1,0),0);
+            var z_left_up = textureLoad(colorBuffer, sample_pos+vec2<i32>(-1,1),0);
+            var z_right_down = textureLoad(colorBuffer, sample_pos+vec2<i32>(1,-1),0);
+            var z_right_mid = textureLoad(colorBuffer, sample_pos+vec2<i32>(1,0),0);
+            var z_right_up = textureLoad(colorBuffer, sample_pos+vec2<i32>(1,1),0);
+            var z_mid_up = textureLoad(colorBuffer, sample_pos+vec2<i32>(0,1),0);
+            var z_mid_down = textureLoad(colorBuffer, sample_pos+vec2<i32>(0,-1),0);
+
+            if false{//bool(settings.clamp_gradient){
+                z_v = clamp(z_v, vec4<f32>(0.), vec4<f32>(1.));
+                z_left_down = clamp(z_left_down, vec4<f32>(0.), vec4<f32>(1.));
+                z_left_mid = clamp(z_left_mid, vec4<f32>(0.), vec4<f32>(1.));
+                z_left_up = clamp(z_left_up, vec4<f32>(0.), vec4<f32>(1.));
+                z_right_down = clamp(z_right_down, vec4<f32>(0.), vec4<f32>(1.));
+                z_right_mid = clamp(z_right_mid, vec4<f32>(0.), vec4<f32>(1.));
+                z_right_up = clamp(z_right_up, vec4<f32>(0.), vec4<f32>(1.));
+                z_mid_up = clamp(z_mid_up, vec4<f32>(0.), vec4<f32>(1.));
+                z_mid_down = clamp(z_mid_down, vec4<f32>(0.), vec4<f32>(1.));
+            }
+            
 
             for (var c = 0u; c < 4u; c++) {
                 z[c][i][j] = z_v[c];
-                dx[c][i][j] = (z_right[c] - z_left[c]) * 0.5;
-                dy[c][i][j] = (z_up[c] - z_down[c]) * 0.5;
-                dxy[c][i][j] = (z_right[c] + z_left[c] - 2.0 * z_v[c]) * 0.5;
+                dx[c][i][j] = (z_right_mid[c] - z_left_mid[c]) * 0.5;
+                dy[c][i][j] = (z_mid_up[c] - z_mid_down[c]) * 0.5;
+                dxy[c][i][j] = (z_right_up[c] - z_right_down[c] - z_left_up[c] + z_left_down[c]) * 0.25;
             }
 
         }
@@ -137,8 +158,8 @@ fn sample_bicubic(pos_in:vec2<f32>)->vec4<f32>{
 fn sample_spline(pos_in:vec2<f32>)->vec4<f32>{
     let tex_size = vec2<f32>(textureDimensions(colorBuffer));
 
-    let pos = pos_in*(tex_size);
-    let pixel_pos = vec2<i32>(pos);
+    let pos = pos_in*tex_size-0.5;
+    let pixel_pos = vec2<i32>(floor(pos));
     let p_frac = fract(pos);
     var z:  array<mat2x2<f32>,4>;
     var dx: array<mat2x2<f32>,4>;
@@ -150,9 +171,15 @@ fn sample_spline(pos_in:vec2<f32>)->vec4<f32>{
             let sample_pos = clamp(pixel_pos + vec2<i32>(i, j), vec2<i32>(0), vec2<i32>(tex_size-1));
 
             let z_v = textureLoad(colorBuffer, sample_pos,0);
-            let dx_v = textureLoad(gradientBuffer_x, sample_pos,0);
-            let dy_v = textureLoad(gradientBuffer_y, sample_pos,0);
-            let dxy_v = textureLoad(gradientBuffer_xy, sample_pos,0);
+            var dx_v = textureLoad(gradientBuffer_x, sample_pos,0)/tex_size.x*2.;
+            var dy_v = textureLoad(gradientBuffer_y, sample_pos,0)/tex_size.y*2.;
+            var dxy_v = textureLoad(gradientBuffer_xy, sample_pos,0)/(tex_size.x*tex_size.y)*2.;
+
+            // if bool(settings.clamp_gradients){
+            //     dx_v = clamp(dx_v, vec4<f32>(-1.), vec4<f32>(1.));
+            //     dy_v = clamp(dy_v, vec4<f32>(-1.), vec4<f32>(1.));
+            //     dxy_v = clamp(dxy_v, vec4<f32>(-1.), vec4<f32>(1.));
+            // }
 
             for (var c = 0u; c < 4u; c++) {
                 z[c][i][j] = z_v[c];
@@ -160,7 +187,6 @@ fn sample_spline(pos_in:vec2<f32>)->vec4<f32>{
                 dy[c][i][j] = dy_v[c];
                 dxy[c][i][j] = dxy_v[c];
             }
-
         }
     }
 
@@ -175,8 +201,8 @@ fn sample_spline(pos_in:vec2<f32>)->vec4<f32>{
 
 fn sample_lanczos(pos_in:vec2<f32>)->vec4<f32>{
     let tex_size = vec2<f32>(textureDimensions(colorBuffer));
-    let pos = pos_in*(tex_size);
-    let pixel_pos = vec2<i32>(pos);
+    let pos = pos_in * tex_size - 0.5;
+    let pixel_pos = vec2<i32>(floor(pos));
     const kernel_size = 3; // Lanczos kernel size
     let a = f32(kernel_size);
     var color = vec4<f32>(0.0);
@@ -239,26 +265,26 @@ fn fs_main(vertex_in: VertexOut) -> @location(0) vec4<f32>
                     color = sample_nearest(vertex_in.tex_coord);
                 }
             }
-            if (settings.gamma_correction == 1u) {
-                color = fromLinear(color);
-            }
+            // if (settings.gamma_correction == 1u) {
+            //     color = fromLinear(color);
+            // }
             return color;
         }
         case CHANNEL_GRAD_X: {
-            grad = textureLoad(gradientBuffer_x, pixel_pos,0);
+            grad = textureLoad(gradientBuffer_x, pixel_pos,0)/tex_size.x*2.;
         }
         case CHANNEL_GRAD_Y: {
-            grad = textureLoad(gradientBuffer_y, pixel_pos,0);
+            grad = textureLoad(gradientBuffer_y, pixel_pos,0)/tex_size.y*2.;
         }
         case CHANNEL_GRAD_XY: {
-            grad = textureLoad(gradientBuffer_xy, pixel_pos,0);
+            grad = textureLoad(gradientBuffer_xy, pixel_pos,0)/(tex_size.x*tex_size.y)*4.;
         }
         default: {
             return vec4<f32>(0.0, 0.0, 0.0, 1.0);
         }
     }
 
-    grad *= 10.;
+    grad *= settings.gradient_vis_scale;
 
     if grad.r < 0.0 {
         color = mix(vec4<f32>(0.0, 0.0, 0.0, 1.0), vec4<f32>(1.0, 0.0, 0.0, 1.0), -grad.r);

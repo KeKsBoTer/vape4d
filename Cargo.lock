@@ -707,10 +707,10 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 [[package]]
 name = "cgmath"
 version = "0.18.0"
-source = "git+https://github.com/rustgd/cgmath#ff840cbf48d79441eaac3e78155df4723511d247"
 dependencies = [
  "approx",
  "bytemuck",
+ "egui-probe",
  "num-traits",
 ]
 

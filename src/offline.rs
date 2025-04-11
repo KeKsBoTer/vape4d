@@ -9,12 +9,12 @@ use crate::{
     WGPUContext,
 };
 
-async fn render_view<P: Projection>(
+async fn render_view(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     renderer: &mut VolumeRenderer,
     volume: &VolumeGPU,
-    camera: Camera<P>,
+    camera: Camera,
     render_settings: &RenderSettings,
     bg: wgpu::Color,
     resolution: Vector2<u32>,
@@ -58,7 +58,7 @@ async fn render_view<P: Projection>(
                 occlusion_query_set: None,
             })
             .forget_lifetime();
-        renderer.render(&queue,&mut render_pass, &frame_data);
+        renderer.render(&queue, &mut render_pass, &frame_data);
     }
     queue.submit(std::iter::once(encoder.finish()));
     let img = download_texture(&target, device, queue).await;
@@ -95,13 +95,17 @@ pub async fn render_volume(
 
     let render_format = wgpu::TextureFormat::Rgba8UnormSrgb;
 
-    let mut renderer = VolumeRenderer::new(&device,&queue, render_format);
+    let mut renderer = VolumeRenderer::new(&device, &queue, render_format);
 
     let ratio = resolution.x as f32 / resolution.y as f32;
     let radius = aabb.radius();
     let camera = Camera::new_aabb_iso(
         aabb,
-        OrthographicProjection::new(Vector2::new(ratio, 1.) * radius * 2., 0.01, 1000.),
+        Projection::Orthographic(OrthographicProjection::new(
+            Vector2::new(ratio, 1.) * radius * 2.,
+            0.01,
+            1000.,
+        )),
     );
 
     let mut images: Vec<ImageBuffer<Rgba<u8>, Vec<u8>>> = Vec::with_capacity(frames.len());
@@ -120,7 +124,7 @@ pub async fn render_volume(
                 spatial_filter: spatial_interpolation,
                 temporal_filter: temporal_interpolation,
                 axis_scale: axis_scale.unwrap_or(Vector3::new(1., 1., 1.)).into(),
-                cmap:cmap.clone(),
+                cmap: cmap.clone(),
                 ..Default::default()
             },
             bg,

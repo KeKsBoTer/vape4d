@@ -2,7 +2,6 @@ use std::{f32::consts::PI, ops::RangeInclusive, time::Duration};
 
 use egui::{emath::Numeric, epaint::TextShape, vec2};
 use egui_plot::{Plot, PlotImage, PlotPoint};
-use egui_probe::EguiProbe;
 
 use crate::{
     cmap::{ColorMap, COLORMAP_RESOLUTION},
@@ -180,6 +179,10 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                             "Linear",
                         )
                     });
+                ui.end_row();
+
+                ui.label("Hardware Interpolation");
+                ui.checkbox(&mut state.render_settings.hardware_interpolation, "");
                 ui.end_row();
 
                 ui.label("Upscaling Method");
@@ -479,6 +482,10 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
         });
         ui.collapsing("Camera",|ui|{
             egui_probe::Probe::new(&mut state.camera)
+            .show(ui);  
+        });
+        ui.collapsing("Camera Controller",|ui|{
+            egui_probe::Probe::new(&mut state.controller)
             .show(ui);  
         });
 

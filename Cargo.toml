@@ -10,9 +10,13 @@ description = "4D Volume Viewer"
 [dependencies]
 wgpu = { version = "24.0", features = ["webgl"], default-features = true}
 winit = "0.30.9"
+# cgmath = { version = "0.18.0", features = [
+#     "bytemuck",
+# ], git = 'https://github.com/rustgd/cgmath' }
 cgmath = { version = "0.18.0", features = [
-    "bytemuck",
-], git = 'https://github.com/rustgd/cgmath' }
+    "bytemuck","egui-probe"
+], path = '/home/niedermayr/Projects/cgmath' }
+
 env_logger = "0.11.7"
 clap = { version = "4.5.34", features = ["derive"] }#
 bytemuck = { version = "1.22", features = ["derive"] }
