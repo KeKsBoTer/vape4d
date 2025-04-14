@@ -75,7 +75,7 @@ pub async fn render_volume(
     spatial_interpolation: wgpu::FilterMode,
     temporal_interpolation: wgpu::FilterMode,
 ) -> anyhow::Result<Vec<ImageBuffer<Rgba<u8>, Vec<u8>>>> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let wgpu_context = WGPUContext::new(&instance, None).await;
     let device = &wgpu_context.device;
     let queue = &wgpu_context.queue;
@@ -154,9 +154,9 @@ pub async fn download_texture(
 
     encoder.copy_texture_to_buffer(
         texture.as_image_copy(),
-        wgpu::ImageCopyBufferBase {
+        wgpu::TexelCopyBufferInfo {
             buffer: &staging_buffer,
-            layout: wgpu::ImageDataLayout {
+            layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(bytes_per_row),
                 rows_per_image: Some(fb_size.height),

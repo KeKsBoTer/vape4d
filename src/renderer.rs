@@ -32,13 +32,13 @@ impl VolumeRenderer {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 buffers: &[],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: color_format,
                     blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
@@ -58,6 +58,7 @@ impl VolumeRenderer {
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
+            cache:None
         });
 
         let sampler_linear = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -82,7 +83,7 @@ impl VolumeRenderer {
     }
 
     pub fn prepare<'a, P: Projection>(
-        &mut self,
+        &self,
         device: &wgpu::Device,
         volume: &VolumeGPU,
         camera: &Camera<P>,
@@ -152,10 +153,10 @@ impl VolumeRenderer {
         }
     }
 
-    pub fn render<'rpass>(
-        &'rpass self,
+    pub fn render<'rpass,'a>(
+        &'a self,
         render_pass: &mut wgpu::RenderPass<'rpass>,
-        frame_data: &'rpass PerFrameData,
+        frame_data: &'a PerFrameData,
     ) {
         render_pass.set_bind_group(0, &frame_data.bind_group, &[]);
         render_pass.set_bind_group(1, frame_data.cmap_bind_group, &[]);

@@ -60,7 +60,7 @@ fn vape4d<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
             img.iter().flat_map(|img| img.to_vec()).collect(),
         )
         .unwrap();
-        return arr.into_pyarray_bound(py);
+        return arr.into_pyarray(py);
     }
 
     #[pyfn(m)]

@@ -23,8 +23,8 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     ui.label("Time");
                     ui.add(
                         egui::Slider::new(&mut state.render_settings.time, (0.)..=(1.))
-                            .clamp_to_range(true)
-                            .fixed_decimals(2),
+                            .clamping(egui::SliderClamping::Always)
+                            .custom_formatter(|v,_|format!("{:.2}", v)),
                     );
                     if ui.button(if state.playing { "||" } else { "▶" }).clicked() {
                         state.playing = !state.playing;
@@ -371,11 +371,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
         .show(ctx, |ui| {
             let (response, painter) = ui.allocate_painter(
                 vec2(100., 100.),
-                Sense {
-                    click: false,
-                    drag: false,
-                    focusable: false,
-                },
+                Sense::empty(),
             );
 
             let to_screen = emath::RectTransform::from_to(
@@ -573,6 +569,7 @@ fn show_cmap(ui: &mut egui::Ui, id: egui::Id, cmap: impl ColorMap + Hash, vmin: 
     let width = vmax - vmin;
     let height = width / 5.;
     let image = PlotImage::new(
+        "cmap preview image",
         texture,
         PlotPoint::new(vmin + width * 0.5, height / 2.),
         vec2(width, height),

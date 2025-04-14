@@ -23,7 +23,7 @@ use winit::{
     event::{DeviceEvent, ElementState, Event, WindowEvent},
     event_loop::EventLoop,
     keyboard::{KeyCode, PhysicalKey},
-    window::{Window, WindowBuilder},
+    window::{Window, WindowAttributes},
 };
 
 use crate::{
@@ -79,6 +79,7 @@ impl WGPUContext {
                     required_features,
                     required_limits: adapter.limits(),
                     label: None,
+                    memory_hints: wgpu::MemoryHints::default(),
                 },
                 None,
             )
@@ -139,7 +140,7 @@ impl WindowContext {
         }
         let window = Arc::new(window);
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: Backends::all().symmetric_difference(Backends::BROWSER_WEBGPU),
             ..Default::default()
         });
@@ -309,7 +310,6 @@ impl WindowContext {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("render command encoder"),
                 });
-        let mut frame_data = Vec::new();
 
         let columns = self.num_columns as usize;
         let rows = (self.volumes.len() as f32 / columns as f32).ceil() as usize;
@@ -335,6 +335,8 @@ impl WindowContext {
         } else {
             None
         };
+
+        let mut frame_data = Vec::new();
 
         if let Some(selected_channel) = self.selected_channel {
             let camera = self.camera.clone();
@@ -373,7 +375,7 @@ impl WindowContext {
                     },
                 })],
                 ..Default::default()
-            });
+            }).forget_lifetime();
             for (i, v) in frame_data.iter().enumerate() {
                 if self.selected_channel.is_none() {
                     let column = i % columns;
@@ -409,7 +411,7 @@ impl WindowContext {
 }
 
 pub async fn open_window(
-    window_builder: WindowBuilder,
+    window_attributes:WindowAttributes,
     volumes: Vec<Volume>,
     cmap: LinearSegmentedColorMap,
     config: RenderConfig,
@@ -419,10 +421,10 @@ pub async fn open_window(
     let version = env!("CARGO_PKG_VERSION");
     let name = env!("CARGO_PKG_NAME");
 
-    let window = window_builder
-        .with_title(format!("{name} {version}"))
-        .build(&event_loop)
-        .unwrap();
+    let attributes = window_attributes.with_title(format!("{name} {version}"));
+
+    #[allow(deprecated)]
+    let window = event_loop.create_window(attributes).unwrap();
 
     let mut state = WindowContext::new(window, volumes, cmap, &config)
         .await
@@ -430,6 +432,7 @@ pub async fn open_window(
 
     let mut last = Instant::now();
     let mut last_touch_position = Vector2::zero();
+    #[allow(deprecated)]
     event_loop.run(move |event,target| 
        
         match event {

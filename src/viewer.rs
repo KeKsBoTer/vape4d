@@ -1,7 +1,6 @@
 use clap::Parser;
+use winit::{dpi::LogicalSize, window::WindowAttributes};
 use std::{ffi::OsString, fmt::Debug, fs::File, io::BufReader, path::PathBuf};
-
-use winit::{dpi::PhysicalSize, window::WindowBuilder};
 
 use crate::{cmap, open_window, volume::Volume, RenderConfig};
 
@@ -34,19 +33,16 @@ where
 
     let data_file = File::open(&opt.input)?;
 
-    let window_builder = WindowBuilder::new().with_inner_size(PhysicalSize::new(800, 600));
-
     let volumes = Volume::load_numpy(BufReader::new(data_file), !opt.channel_first)
         .expect("Failed to load volume");
 
     #[cfg(feature = "colormaps")]
-    let cmap = opt.colormap.map_or(
-        Ok(cmap::COLORMAPS["seaborn"]["icefire"].clone()),
-        |path| {
+    let cmap = opt
+        .colormap
+        .map_or(Ok(cmap::COLORMAPS["seaborn"]["icefire"].clone()), |path| {
             let reader = File::open(path)?;
             cmap::GenericColorMap::read(reader)
-        },
-    )?;
+        })?;
     #[cfg(not(feature = "colormaps"))]
     let cmap = {
         let reader = File::open(&opt.colormap)?;
@@ -54,7 +50,7 @@ where
     };
 
     open_window(
-        window_builder,
+        WindowAttributes::default().with_inner_size(LogicalSize::new(800,600)),
         volumes,
         cmap.into_linear_segmented(cmap::COLORMAP_RESOLUTION),
         RenderConfig {
