@@ -196,6 +196,19 @@ async fn load_data() -> Result<Vec<u8>, JsValue> {
     return Ok(file_data);
 }
 
+fn show_error(document: &web_sys::Document, error: anyhow::Error) -> Result<(), JsValue> {
+    let error_div = document
+        .get_element_by_id("error-message")
+        .ok_or(JsError::new("cannot find error message div"))?
+        .dyn_into::<web_sys::HtmlElement>()?;
+    error_div.set_inner_html(&format!("Error: {:?}", error));
+    document
+        .get_element_by_id("loading-error")
+        .ok_or(JsError::new("cannot find loading error div"))?
+        .set_attribute("style", "display:block;")?;
+    Ok(())
+}
+
 /// Start the viewer with the given canvas id and optional volume data and colormap.
 /// If volume data and colormap are not provided, the viewer will prompt the user to select a file (or load from a url provided in the page url).
 async fn start_viewer(
@@ -208,6 +221,9 @@ async fn start_viewer(
     let document = window
         .document()
         .ok_or(JsError::new("cannot access document"))?;
+
+    document.set_title(&format!("{} v{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")));
+
     let canvas = document
         .get_element_by_id(&canvas_id)
         .ok_or(JsError::new("cannot find canvas"))?
@@ -246,23 +262,18 @@ async fn start_viewer(
 
     wasm_bindgen_futures::spawn_local(async move {
         let reader_v = Cursor::new(volume_data);
-        let volumes: Vec<Volume> = Volume::load_numpy(reader_v, true).unwrap();
+        let volumes = match Volume::load_numpy(reader_v, true) {
+            Ok(volumes) => volumes,
+            Err(err) => {
+                show_error(&document, err).ok();
+                return;
+            }
+        };
         overlay.set_attribute("style", "display:none;").ok();
 
         let err = open_window(window_attributes, volumes, colormap, render_config).await;
         if let Err(err) = err {
-            log::error!("Error: {:?}", err);
-            let error_div = document
-                .get_element_by_id("error-message")
-                .unwrap()
-                .dyn_into::<web_sys::HtmlElement>()
-                .unwrap();
-            error_div.set_inner_html(&format!("Error: {:?}", err));
-            document
-                .get_element_by_id("loading-error")
-                .unwrap()
-                .set_attribute("style", "display:block;")
-                .ok();
+            show_error(&document, err).unwrap();
         }
     });
     Ok(())

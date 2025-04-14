@@ -43,7 +43,6 @@ pub mod volume;
 pub use viewer::viewer;
 #[cfg(feature = "python")]
 pub mod py;
-// pub mod image;
 
 #[derive(Debug)]
 pub struct RenderConfig {

@@ -37,8 +37,14 @@ impl Volume {
                 resolution[0] as f32 / *res_min as f32,
             ),
         };
-        let vmin = *vec_data.iter().min_by(|a, b| a.total_cmp(b)).unwrap();
-        let vmax = *vec_data.iter().max_by(|a, b| a.total_cmp(b)).unwrap();
+        let vmin = *vec_data
+            .iter()
+            .min_by(|a, b| a.total_cmp(b))
+            .unwrap_or(&f16::ZERO);
+        let vmax = *vec_data
+            .iter()
+            .max_by(|a, b| a.total_cmp(b))
+            .unwrap_or(&(vmin + f16::ONE));
         Self {
             timesteps: shape[0] as u32,
             resolution: resolution.into(),
@@ -110,7 +116,7 @@ impl Volume {
         if min_value == max_value {
             max_value = min_value + 1.0;
         }
-        let res_min = resolution.iter().min().unwrap();
+        let res_min = resolution.iter().min().unwrap_or(&1);
 
         let aabb = Aabb {
             min: Point3::new(0.0, 0.0, 0.0),
@@ -141,18 +147,27 @@ impl Volume {
     {
         match array.dtype() {
             npyz::DType::Plain(d) => match d.type_char() {
-                npyz::TypeChar::Float => match d.num_bytes().unwrap() {
+                npyz::TypeChar::Float => match d
+                    .num_bytes()
+                    .ok_or(anyhow::format_err!("unsupported type {:}", d))?
+                {
                     2 => Self::read_dyn::<_, f16>(array, time_first),
                     4 => Self::read_dyn::<_, f32>(array, time_first),
                     8 => Self::read_dyn::<_, f64>(array, time_first),
                     _ => anyhow::bail!("unsupported type {:}", d),
                 },
-                npyz::TypeChar::Uint => match d.num_bytes().unwrap() {
+                npyz::TypeChar::Uint => match d
+                    .num_bytes()
+                    .ok_or(anyhow::format_err!("unsupported type {:}", d))?
+                {
                     1 => Self::read_dyn::<_, u8>(array, time_first),
                     2 => Self::read_dyn::<_, u16>(array, time_first),
                     _ => anyhow::bail!("unsupported type {:}", d),
                 },
-                npyz::TypeChar::Int => match d.num_bytes().unwrap() {
+                npyz::TypeChar::Int => match d
+                    .num_bytes()
+                    .ok_or(anyhow::format_err!("unsupported type {:}", d))?
+                {
                     1 => Self::read_dyn::<_, i8>(array, time_first),
                     2 => Self::read_dyn::<_, i16>(array, time_first),
                     _ => anyhow::bail!("unsupported type {:}", d),
@@ -188,7 +203,9 @@ impl Volume {
             .next()
             .ok_or(anyhow::format_err!("no array present"))?
             .to_string();
-        let array = reader.by_name(arr_name.as_str())?.unwrap();
+        let array = reader
+            .by_name(arr_name.as_str())?
+            .ok_or(anyhow::format_err!("array '{}' not found", arr_name))?;
         Self::read(array, time_first)
     }
 }

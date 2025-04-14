@@ -59,8 +59,7 @@ async fn render_view<P: Projection>(
         renderer.render(&mut render_pass, &frame_data);
     }
     queue.submit(std::iter::once(encoder.finish()));
-    let img = download_texture(&target, device, queue).await;
-    return Ok(img);
+    return download_texture(&target, device, queue).await;
 }
 
 pub async fn render_volume(
@@ -129,10 +128,13 @@ pub async fn download_texture(
     texture: &wgpu::Texture,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+) -> anyhow::Result<ImageBuffer<Rgba<u8>, Vec<u8>>> {
     let texture_format = texture.format();
 
-    let texel_size: u32 = texture_format.block_copy_size(None).unwrap();
+    let texel_size: u32 = texture_format.block_copy_size(None).ok_or(anyhow::anyhow!(
+        "Failed to get texel size for format {:?}",
+        texture_format
+    ))?;
     let fb_size = texture.size();
     let align: u32 = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT - 1;
     let bytes_per_row = (texel_size * fb_size.width) + align & !align;
@@ -175,11 +177,13 @@ pub async fn download_texture(
             fb_size.height,
             data.to_vec(),
         )
-        .unwrap()
+        .ok_or(anyhow::anyhow!(
+            "Failed to create image buffer from raw data"
+        ))?
     };
     staging_buffer.unmap();
 
-    return image::imageops::crop(&mut image, 0, 0, fb_size.width, fb_size.height).to_image();
+    return Ok(image::imageops::crop(&mut image, 0, 0, fb_size.width, fb_size.height).to_image());
 }
 
 async fn download_buffer<'a>(

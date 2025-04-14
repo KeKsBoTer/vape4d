@@ -2,7 +2,7 @@ use cgmath::Vector2;
 use half::f16;
 use image::{ImageBuffer, Rgba};
 use numpy::{ndarray::StrideShape, IntoPyArray, PyArray4, PyReadonlyArrayDyn};
-use pyo3::prelude::*;
+use pyo3::{exceptions::PyTypeError, prelude::*};
 use std::env::{self};
 
 use crate::{
@@ -28,9 +28,22 @@ fn vape4d<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
         vmax: Option<f32>,
         spatial_interpolation: Option<String>,
         temporal_interpolation: Option<String>,
-    ) -> Bound<'py, PyArray4<u8>> {
+    ) -> PyResult<Bound<'py, PyArray4<u8>>> {
         let volume = Volume::from_array(volume.as_array());
         let cmap = ListedColorMap::from_array(cmap.as_array());
+
+        let spatial_interpolation = spatial_interpolation
+            .map(|s| parse_interpolation(&s))
+            .transpose()
+            .map_err(|e| PyTypeError::new_err(format!("{:?}", e)))?
+            .unwrap_or_default();
+
+        let temporal_interpolation = temporal_interpolation
+            .map(|s| parse_interpolation(&s))
+            .transpose()
+            .map_err(|e| PyTypeError::new_err(format!("{:?}", e)))?
+            .unwrap_or_default();
+
         let img: Vec<ImageBuffer<Rgba<u8>, Vec<u8>>> = pollster::block_on(render_volume(
             vec![volume],
             cmap::GenericColorMap::Listed(cmap),
@@ -45,22 +58,18 @@ fn vape4d<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
             vmin,
             vmax,
             distance_scale,
-            spatial_interpolation
-                .map(|s| parse_interpolation(&s).unwrap())
-                .unwrap_or_default(),
-            temporal_interpolation
-                .map(|s| parse_interpolation(&s).unwrap())
-                .unwrap_or_default(),
+            spatial_interpolation,
+            temporal_interpolation,
         ))
-        .unwrap();
+        .map_err(|e| PyTypeError::new_err(format!("{:?}", e)))?;
 
         let shape = StrideShape::from((time.len(), width as usize, height as usize, 4 as usize));
         let arr = numpy::ndarray::Array4::from_shape_vec(
             shape,
             img.iter().flat_map(|img| img.to_vec()).collect(),
         )
-        .unwrap();
-        return arr.into_pyarray(py);
+        .map_err(|e| PyTypeError::new_err(format!("{:?}", e)))?;
+        return Ok(arr.into_pyarray(py));
     }
 
     #[pyfn(m)]
