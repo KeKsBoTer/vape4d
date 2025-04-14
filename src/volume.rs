@@ -1,8 +1,6 @@
 use bytemuck::Zeroable;
 use cgmath::{BaseNum, EuclideanSpace, MetricSpace, Point3, Vector3, Zero};
 use half::f16;
-#[cfg(target_arch = "wasm32")]
-use instant::Instant;
 use npyz::{npz, Deserialize, NpyFile};
 use num_traits::Float;
 #[cfg(feature = "python")]
@@ -10,6 +8,8 @@ use numpy::ndarray::ArrayViewD;
 use std::io::{Read, Seek};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 use wgpu::util::{DeviceExt, TextureDataOrder};
 
 pub struct Volume {

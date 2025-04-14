@@ -5,10 +5,10 @@ use renderer::{RenderSettings, VolumeRenderer};
 use std::{path::PathBuf, sync::Arc};
 use volume::VolumeGPU;
 
-#[cfg(target_arch = "wasm32")]
-use instant::{Duration, Instant};
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
+#[cfg(target_arch = "wasm32")]
+use web_time::{Duration, Instant};
 
 use wgpu::Backends;
 
@@ -66,10 +66,13 @@ pub struct WGPUContext {
 }
 
 impl WGPUContext {
-    pub async fn new(instance: &wgpu::Instance, surface: Option<&wgpu::Surface<'static>>) -> Self {
+    pub async fn new(
+        instance: &wgpu::Instance,
+        surface: Option<&wgpu::Surface<'static>>,
+    ) -> anyhow::Result<Self> {
         let adapter = wgpu::util::initialize_adapter_from_env_or_default(instance, surface)
             .await
-            .unwrap();
+            .ok_or(anyhow::anyhow!("Failed to find a suitable adapter"))?;
 
         let required_features = wgpu::Features::default();
 
@@ -83,14 +86,13 @@ impl WGPUContext {
                 },
                 None,
             )
-            .await
-            .unwrap();
+            .await?;
 
-        Self {
+        Ok(Self {
             device,
             queue,
             adapter,
-        }
+        })
     }
 }
 
@@ -147,7 +149,7 @@ impl WindowContext {
 
         let surface: wgpu::Surface = instance.create_surface(window.clone())?;
 
-        let wgpu_context = WGPUContext::new(&instance, Some(&surface)).await;
+        let wgpu_context = WGPUContext::new(&instance, Some(&surface)).await?;
 
         log::info!("device: {:?}", wgpu_context.adapter.get_info().name);
 
@@ -364,18 +366,20 @@ impl WindowContext {
         }
 
         {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view_rgb,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.background_color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            }).forget_lifetime();
+            let mut render_pass = encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("render pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view_rgb,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(self.background_color),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                })
+                .forget_lifetime();
             for (i, v) in frame_data.iter().enumerate() {
                 if self.selected_channel.is_none() {
                     let column = i % columns;
@@ -411,12 +415,12 @@ impl WindowContext {
 }
 
 pub async fn open_window(
-    window_attributes:WindowAttributes,
+    window_attributes: WindowAttributes,
     volumes: Vec<Volume>,
     cmap: LinearSegmentedColorMap,
     config: RenderConfig,
-) {
-    let event_loop = EventLoop::new().unwrap();
+) -> anyhow::Result<()> {
+    let event_loop = EventLoop::new()?;
 
     let version = env!("CARGO_PKG_VERSION");
     let name = env!("CARGO_PKG_NAME");
@@ -424,17 +428,14 @@ pub async fn open_window(
     let attributes = window_attributes.with_title(format!("{name} {version}"));
 
     #[allow(deprecated)]
-    let window = event_loop.create_window(attributes).unwrap();
+    let window = event_loop.create_window(attributes)?;
 
-    let mut state = WindowContext::new(window, volumes, cmap, &config)
-        .await
-        .unwrap();
+    let mut state = WindowContext::new(window, volumes, cmap, &config).await?;
 
     let mut last = Instant::now();
     let mut last_touch_position = Vector2::zero();
     #[allow(deprecated)]
-    event_loop.run(move |event,target| 
-       
+    event_loop.run(move |event,target|
         match event {
         Event::WindowEvent {
             ref event,
@@ -485,7 +486,6 @@ pub async fn open_window(
                         last_touch_position = Vector2::new(touch.location.x, touch.location.y);
                     }
                     _=>{}
-                    
                 }
             }
             WindowEvent::MouseInput { state:button_state, button, .. }=>{
@@ -505,7 +505,6 @@ pub async fn open_window(
                 let dt = now-last;
                 last = now;
                 state.update(dt);
-    
                 match state.render() {
                     Ok(_) => {}
                     // Reconfigure the surface if lost
@@ -528,7 +527,6 @@ pub async fn open_window(
         } => {
             state.controller.process_mouse(delta.0 as f32, delta.1 as f32)
         }
-        
         Event::AboutToWait => {
             #[cfg(target_arch = "wasm32")]
             use winit::platform::web::WindowExtWebSys;
@@ -546,6 +544,7 @@ pub async fn open_window(
             state.window.request_redraw();
         }
         _ => {},
-    }).unwrap();
+    })?;
     log::info!("exit!");
+    return Ok(());
 }

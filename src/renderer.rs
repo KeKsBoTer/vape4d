@@ -58,7 +58,7 @@ impl VolumeRenderer {
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
-            cache:None
+            cache: None,
         });
 
         let sampler_linear = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -153,7 +153,7 @@ impl VolumeRenderer {
         }
     }
 
-    pub fn render<'rpass,'a>(
+    pub fn render<'rpass, 'a>(
         &'a self,
         render_pass: &mut wgpu::RenderPass<'rpass>,
         frame_data: &'a PerFrameData,

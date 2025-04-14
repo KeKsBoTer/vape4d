@@ -1,14 +1,13 @@
 use std::io::Cursor;
 
-use instant::Duration;
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::js_sys::{ArrayBuffer, Uint8Array};
 use web_sys::{Request, RequestInit, RequestMode, Response};
+use web_time::Duration;
 use winit::platform::web::WindowAttributesExtWebSys;
 use winit::window::WindowAttributes;
-
 
 use crate::cmap::{self, GenericColorMap, COLORMAP_RESOLUTION};
 use crate::volume::Volume;
@@ -158,15 +157,15 @@ pub async fn download_file(window: web_sys::Window, url: String) -> Result<Vec<u
     Ok(byte_buffer.to_vec())
 }
 
-async fn load_colormap() -> Result<Option<Vec<u8>>,JsValue>{
+async fn load_colormap() -> Result<Option<Vec<u8>>, JsValue> {
     let window = web_sys::window().ok_or(JsError::new("cannot access window"))?;
     let search_string = window.location().search()?;
     let file_param = web_sys::UrlSearchParams::new_with_str(&search_string)?.get("colormap");
 
-    return match file_param{
-        Some(url)=> download_file(window, url).await.map(|v|Some(v)),
-        None=> Ok(None)
-    } 
+    return match file_param {
+        Some(url) => download_file(window, url).await.map(|v| Some(v)),
+        None => Ok(None),
+    };
 }
 
 /// load volume data from a file file promt or url (HTTP Get parameter "file")
@@ -196,7 +195,6 @@ async fn load_data() -> Result<Vec<u8>, JsValue> {
     };
     return Ok(file_data);
 }
-
 
 /// Start the viewer with the given canvas id and optional volume data and colormap.
 /// If volume data and colormap are not provided, the viewer will prompt the user to select a file (or load from a url provided in the page url).
@@ -230,27 +228,42 @@ async fn start_viewer(
     spinner.set_attribute("style", "display:flex;")?;
     let volume_data = match volume_data {
         Some(data) => data,
-        None => load_data().await?
+        None => load_data().await?,
     };
     // load colormap from url if present
     let colormap = match colormap {
         Some(data) => Some(data),
-        None => load_colormap().await?
+        None => load_colormap().await?,
     };
     let colormap = match colormap {
-        Some(data) => GenericColorMap::read(Cursor::new(data)).map_err(|e| JsError::new(&format!("Failed to load colormap: {}", e)))?.into_linear_segmented(COLORMAP_RESOLUTION),
+        Some(data) => GenericColorMap::read(Cursor::new(data))
+            .map_err(|e| JsError::new(&format!("Failed to load colormap: {}", e)))?
+            .into_linear_segmented(COLORMAP_RESOLUTION),
         None => cmap::COLORMAPS["seaborn"]["icefire"]
             .clone()
             .into_linear_segmented(COLORMAP_RESOLUTION),
     };
 
     wasm_bindgen_futures::spawn_local(async move {
-    
         let reader_v = Cursor::new(volume_data);
         let volumes: Vec<Volume> = Volume::load_numpy(reader_v, true).unwrap();
         overlay.set_attribute("style", "display:none;").ok();
 
-        open_window(window_attributes, volumes, colormap, render_config).await
+        let err = open_window(window_attributes, volumes, colormap, render_config).await;
+        if let Err(err) = err {
+            log::error!("Error: {:?}", err);
+            let error_div = document
+                .get_element_by_id("error-message")
+                .unwrap()
+                .dyn_into::<web_sys::HtmlElement>()
+                .unwrap();
+            error_div.set_inner_html(&format!("Error: {:?}", err));
+            document
+                .get_element_by_id("loading-error")
+                .unwrap()
+                .set_attribute("style", "display:block;")
+                .ok();
+        }
     });
     Ok(())
 }

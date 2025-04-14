@@ -1,6 +1,6 @@
 use clap::Parser;
-use winit::{dpi::LogicalSize, window::WindowAttributes};
 use std::{ffi::OsString, fmt::Debug, fs::File, io::BufReader, path::PathBuf};
+use winit::{dpi::LogicalSize, window::WindowAttributes};
 
 use crate::{cmap, open_window, volume::Volume, RenderConfig};
 
@@ -50,7 +50,7 @@ where
     };
 
     open_window(
-        WindowAttributes::default().with_inner_size(LogicalSize::new(800,600)),
+        WindowAttributes::default().with_inner_size(LogicalSize::new(800, 600)),
         volumes,
         cmap.into_linear_segmented(cmap::COLORMAP_RESOLUTION),
         RenderConfig {
@@ -66,6 +66,5 @@ where
             distance_scale: 1.0,
         },
     )
-    .await;
-    Ok(())
+    .await
 }

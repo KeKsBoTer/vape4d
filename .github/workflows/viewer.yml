@@ -39,7 +39,7 @@ jobs:
       - name: Install python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
           cache: 'pip'
       - name: Generate Colormaps
         run: |
@@ -47,7 +47,7 @@ jobs:
           python colormaps.py
       - name: Build
         run: |
-          cargo install wasm-bindgen-cli --version 0.2.92
+          cargo install wasm-bindgen-cli --version 0.2.100
           bash build_wasm.sh
 
       # build docs

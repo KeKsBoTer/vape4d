@@ -24,7 +24,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     ui.add(
                         egui::Slider::new(&mut state.render_settings.time, (0.)..=(1.))
                             .clamping(egui::SliderClamping::Always)
-                            .custom_formatter(|v,_|format!("{:.2}", v)),
+                            .custom_formatter(|v, _| format!("{:.2}", v)),
                     );
                     if ui.button(if state.playing { "||" } else { "▶" }).clicked() {
                         state.playing = !state.playing;
@@ -369,10 +369,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
         .interactable(false)
         .order(Order::Background)
         .show(ctx, |ui| {
-            let (response, painter) = ui.allocate_painter(
-                vec2(100., 100.),
-                Sense::empty(),
-            );
+            let (response, painter) = ui.allocate_painter(vec2(100., 100.), Sense::empty());
 
             let to_screen = emath::RectTransform::from_to(
                 Rect::from_two_pos(Pos2::new(-1.2, -1.2), Pos2::new(1.2, 1.2)),

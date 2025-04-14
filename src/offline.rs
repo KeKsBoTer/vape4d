@@ -76,7 +76,7 @@ pub async fn render_volume(
     temporal_interpolation: wgpu::FilterMode,
 ) -> anyhow::Result<Vec<ImageBuffer<Rgba<u8>, Vec<u8>>>> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
-    let wgpu_context = WGPUContext::new(&instance, None).await;
+    let wgpu_context = WGPUContext::new(&instance, None).await?;
     let device = &wgpu_context.device;
     let queue = &wgpu_context.queue;
 

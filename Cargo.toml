@@ -60,7 +60,7 @@ console_error_panic_hook = "0.1.7"
 wasm-bindgen-futures = "0.4.42"
 console_log = "1"
 log = "0.4"
-instant = { version = "0.1.12", features = ["wasm-bindgen"] }
+web-time = "1.1.0"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-cli = "0.2.100"
