@@ -32,12 +32,20 @@ struct Settings {
     vmin: f32,
     vmax: f32,
     gamma_correction: u32,
-    
+
     upscaling_method:u32,
     selected_channel:u32,
     hardware_interpolation:u32,
-    clamp_gradients:u32,
     gradient_vis_scale:f32,
+
+    clamp_gradients:u32,
+    gradient_clamp_value_x: f32,
+    gradient_clamp_value_y: f32,
+    gradient_clamp_value_xy: f32,
+
+    random_ray_start_offset:u32,
+    cmap_fd_h: f32,
+    cmap_grad_clip: f32,
 }
 
 
@@ -123,18 +131,6 @@ fn sample_bicubic(pos_in:vec2<f32>)->vec4<f32>{
             var z_right_up = textureLoad(colorBuffer, sample_pos+vec2<i32>(1,1),0);
             var z_mid_up = textureLoad(colorBuffer, sample_pos+vec2<i32>(0,1),0);
             var z_mid_down = textureLoad(colorBuffer, sample_pos+vec2<i32>(0,-1),0);
-
-            if false{//bool(settings.clamp_gradient){
-                z_v = clamp(z_v, vec4<f32>(0.), vec4<f32>(1.));
-                z_left_down = clamp(z_left_down, vec4<f32>(0.), vec4<f32>(1.));
-                z_left_mid = clamp(z_left_mid, vec4<f32>(0.), vec4<f32>(1.));
-                z_left_up = clamp(z_left_up, vec4<f32>(0.), vec4<f32>(1.));
-                z_right_down = clamp(z_right_down, vec4<f32>(0.), vec4<f32>(1.));
-                z_right_mid = clamp(z_right_mid, vec4<f32>(0.), vec4<f32>(1.));
-                z_right_up = clamp(z_right_up, vec4<f32>(0.), vec4<f32>(1.));
-                z_mid_up = clamp(z_mid_up, vec4<f32>(0.), vec4<f32>(1.));
-                z_mid_down = clamp(z_mid_down, vec4<f32>(0.), vec4<f32>(1.));
-            }
             
 
             for (var c = 0u; c < 4u; c++) {
@@ -173,13 +169,7 @@ fn sample_spline(pos_in:vec2<f32>)->vec4<f32>{
             let z_v = textureLoad(colorBuffer, sample_pos,0);
             var dx_v = textureLoad(gradientBuffer_x, sample_pos,0)/tex_size.x*2.;
             var dy_v = textureLoad(gradientBuffer_y, sample_pos,0)/tex_size.y*2.;
-            var dxy_v = textureLoad(gradientBuffer_xy, sample_pos,0)/(tex_size.x*tex_size.y)*2.;
-
-            // if bool(settings.clamp_gradients){
-            //     dx_v = clamp(dx_v, vec4<f32>(-1.), vec4<f32>(1.));
-            //     dy_v = clamp(dy_v, vec4<f32>(-1.), vec4<f32>(1.));
-            //     dxy_v = clamp(dxy_v, vec4<f32>(-1.), vec4<f32>(1.));
-            // }
+            var dxy_v = textureLoad(gradientBuffer_xy, sample_pos,0)/(tex_size.x*tex_size.y)*4.;
 
             for (var c = 0u; c < 4u; c++) {
                 z[c][i][j] = z_v[c];
@@ -203,7 +193,7 @@ fn sample_lanczos(pos_in:vec2<f32>)->vec4<f32>{
     let tex_size = vec2<f32>(textureDimensions(colorBuffer));
     let pos = pos_in * tex_size - 0.5;
     let pixel_pos = vec2<i32>(floor(pos));
-    const kernel_size = 3; // Lanczos kernel size
+    let kernel_size:i32 = 3; // Lanczos kernel size
     let a = f32(kernel_size);
     var color = vec4<f32>(0.0);
     var weight_sum = 0.0;

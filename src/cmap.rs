@@ -447,7 +447,8 @@ fn sample_channel(x: f32, values: &[(f32, f32, f32)]) -> f32 {
         let (x0, _, y0) = values[i];
         let (x1, y1, _) = values[i + 1];
         if x0 <= x && x <= x1 {
-            return y0 + (y1 - y0) * (x - x0) / (x1 - x0);
+            let v =  y0 + (y1 - y0) * (x - x0) / (x1 - x0);
+            return v.min(0.95);
         }
     }
     return 0.0;

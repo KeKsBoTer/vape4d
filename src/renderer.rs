@@ -114,11 +114,12 @@ impl VolumeRenderer {
         volume: &VolumeGPU,
         camera: &Camera,
         render_settings: &RenderSettings,
+        resolution: [u32; 2],
         channel: usize,
     ) -> PerFrameData {
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("camera buffer"),
-            contents: bytemuck::bytes_of(&CameraUniform::from(camera)),
+            contents: bytemuck::bytes_of(&CameraUniform::from((camera,resolution))),
             usage: wgpu::BufferUsages::UNIFORM,
         });
 
@@ -270,6 +271,10 @@ pub struct CameraUniform {
 
     // inverse projection matrix
     pub(crate) proj_inv_matrix: Matrix4<f32>,
+
+    pub(crate) resolution: [u32; 2],
+
+    _pad: [u32; 2],
 }
 
 impl Default for CameraUniform {
@@ -279,6 +284,8 @@ impl Default for CameraUniform {
             view_inv_matrix: Matrix4::identity(),
             proj_matrix: Matrix4::identity(),
             proj_inv_matrix: Matrix4::identity(),
+            resolution: [0, 0],
+            _pad: [0; 2],
         }
     }
 }
@@ -298,12 +305,17 @@ impl CameraUniform {
         self.set_proj_mat(camera.projection.projection_matrix());
         self.set_view_mat(camera.view_matrix());
     }
+
+    pub fn set_resolution(&mut self, resolution: [u32; 2]) {
+        self.resolution = resolution;
+    }
 }
 
-impl  From<&Camera> for CameraUniform {
-    fn from(camera: &Camera) -> Self {
+impl From<(&Camera,[u32;2])> for CameraUniform {
+    fn from(camera:(&Camera,[u32;2])) -> Self {
         let mut uniform = CameraUniform::default();
-        uniform.set_camera(camera);
+        uniform.set_camera(camera.0);
+        uniform.set_resolution(camera.1);
         uniform
     }
 }
@@ -313,11 +325,13 @@ pub struct RenderSettings {
     #[egui_probe(skip)]
     pub clipping_aabb: Option<Aabb<f32>>,
     pub time: f32,
+    #[egui_probe(range = (1e-6)..)]
     pub step_size: f32,
     #[egui_probe(skip)]
     pub spatial_filter: wgpu::FilterMode,
     #[egui_probe(skip)]
     pub temporal_filter: wgpu::FilterMode,
+    #[egui_probe(range = (1e-4)..)]
     pub distance_scale: f32,
     pub vmin: Option<f32>,
     pub vmax: Option<f32>,
@@ -325,12 +339,19 @@ pub struct RenderSettings {
     pub axis_scale: [f32;3],
     #[egui_probe(skip)]
     pub cmap: ColorMap,
+    #[egui_probe(range = (1.)..)]
     pub render_scale: f32,
     pub upscaling_method: UpscalingMethod,
     pub selected_channel: u32,
     pub hardware_interpolation: bool,
-    pub clamp_gradients:bool,
+    pub clamp_gradient_value:Option<Vector3<f32>>,
+    #[egui_probe(range = 1e-4..)]
     pub gradient_vis_scale: f32,
+    pub random_ray_start_offset: bool,
+    #[egui_probe(range = (1./255.)..=(1.0))]
+    pub cmap_fd_h: f32,
+
+    pub cmap_grad_clip: Option<f32>,
 }
 
 impl Default for RenderSettings {
@@ -351,8 +372,11 @@ impl Default for RenderSettings {
             upscaling_method: UpscalingMethod::Spline,
             selected_channel: 0,
             hardware_interpolation: true,
-            clamp_gradients:true,
             gradient_vis_scale: 1.0,
+            clamp_gradient_value:None,
+            random_ray_start_offset: true,
+            cmap_fd_h: 1./64.,
+            cmap_grad_clip: None
         }
     }
 }
@@ -391,9 +415,17 @@ pub struct RenderSettingsUniform {
     upscaling_method: UpscalingMethod,
     selected_channel: u32,
     hardware_interpolation: u32,
-    clamp_gradients: u32,
     gradient_vis_scale: f32,
-    _pad: [u32; 3],
+
+    clamp_gradients: u32,
+    gradient_clamp_x: f32,
+    gradient_clamp_y: f32,
+    gradient_clamp_xy: f32,
+    
+    random_ray_start_offset: u32,
+    cmap_fd_h: f32,
+    cmap_grad_clip: f32,
+    _pad: [u32; 1],
 }
 
 impl RenderSettingsUniform {
@@ -425,9 +457,21 @@ impl RenderSettingsUniform {
             upscaling_method:settings.upscaling_method,
             selected_channel: settings.selected_channel,
             hardware_interpolation: settings.hardware_interpolation as u32,
-            clamp_gradients: settings.clamp_gradients as u32,
+            clamp_gradients: settings.clamp_gradient_value.is_some() as u32,
             gradient_vis_scale: settings.gradient_vis_scale,
-            _pad: [0; 3],
+            gradient_clamp_x: settings
+                .clamp_gradient_value.map(|v| v.x)
+                .unwrap_or(f32::MAX),
+                gradient_clamp_y: settings
+                .clamp_gradient_value.map(|v| v.y)
+                .unwrap_or(f32::MAX),
+                gradient_clamp_xy: settings
+                .clamp_gradient_value.map(|v| v.z)
+                .unwrap_or(f32::MAX),
+            random_ray_start_offset: settings.random_ray_start_offset as u32,
+            cmap_fd_h: settings.cmap_fd_h,
+            cmap_grad_clip: settings.cmap_grad_clip.unwrap_or(f32::MAX),
+            _pad: [0; 1],
         }
     }
     
@@ -468,9 +512,15 @@ impl Default for RenderSettingsUniform {
             upscaling_method: UpscalingMethod::Bicubic,
             selected_channel:0,
             hardware_interpolation: true as u32,
-            clamp_gradients: true as u32,
+            clamp_gradients: false as u32,
             gradient_vis_scale: 1.0,
-            _pad: [0; 3],
+            gradient_clamp_x: f32::MAX,
+            gradient_clamp_y: f32::MAX,
+            gradient_clamp_xy: f32::MAX,
+            random_ray_start_offset: true as u32,
+            cmap_fd_h: 1./64.,
+            cmap_grad_clip: f32::MAX,
+            _pad: [0; 1],
         }
     }
 }
@@ -693,6 +743,22 @@ impl TryFrom<u32> for UpscalingMethod {
     }
 }
 
+
+impl clap::ValueEnum for UpscalingMethod {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Nearest, Self::Bilinear, Self::Bicubic, Self::Spline, Self::Lanczos]
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        match self {
+            Self::Nearest => Some(clap::builder::PossibleValue::new("Nearest")),
+            Self::Bilinear => Some(clap::builder::PossibleValue::new("Bilinear")),
+            Self::Bicubic => Some(clap::builder::PossibleValue::new("Bicubic")),
+            Self::Spline => Some(clap::builder::PossibleValue::new("Spline")),
+            Self::Lanczos => Some(clap::builder::PossibleValue::new("Lanczos")),
+        }
+    }
+}
 unsafe impl bytemuck::Zeroable for UpscalingMethod {}
 unsafe impl bytemuck::Pod for UpscalingMethod {}
 

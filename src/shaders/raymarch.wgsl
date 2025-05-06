@@ -4,11 +4,18 @@ const FILTER_LINEAR:u32 = 1;
 const PI:f32 = 3.1415926535897932384626433832795;
 const TWO_PI:f32 = 6.283185307179586476925286766559;
 
+const INTERPOLATION_NEAREST:u32 = 0u;
+const INTERPOLATION_BILINEAR:u32 = 1u;
+const INTERPOLATION_BICUBIC:u32 = 2u;
+const INTERPOLATION_SPLINE:u32 = 3u;
+const INTERPOLATION_LANCZOS:u32 = 4u;
+
 struct CameraUniforms {
     view: mat4x4<f32>,
     view_inv: mat4x4<f32>,
     proj: mat4x4<f32>,
     proj_inv: mat4x4<f32>,
+    resolution: vec2<u32>,
 };
 
 struct Settings {
@@ -24,11 +31,20 @@ struct Settings {
     vmin: f32,
     vmax: f32,
     gamma_correction: u32,
+
     upscaling_method:u32,
     selected_channel:u32,
     hardware_interpolation:u32,
+    gradient_vis_scale:f32,
+
     clamp_gradients:u32,
-    gradient_vis_scale:f32
+    gradient_clamp_value_x: f32,
+    gradient_clamp_value_y: f32,
+    gradient_clamp_value_xy: f32,
+
+    random_ray_start_offset:u32,
+    cmap_fd_h: f32,
+    cmap_grad_clip: f32,
 }
 
 
@@ -224,6 +240,10 @@ fn intersect_aabb_dir(ray_origin: vec3<f32>, ray_direction: vec3<f32>, lower: ve
     return dir;
 }
 
+fn rand(co:vec2<f32>)->f32{
+    return fract(sin(dot(co, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+}
+
 
 // traces ray trough volume and returns color
 fn trace_ray_simple(
@@ -249,8 +269,16 @@ fn trace_ray_simple(
     }
 
     let start_cam_pos = ray.orig;
-    let start = max(0., intersec.x) + 1e-4;
+    var start = max(0., intersec.x) + 1e-4;
+    if bool(settings.random_ray_start_offset){
+        start += rand(pixel_pos) * settings.step_size;
+    }
     ray.orig += start * ray.dir;
+
+    // *color_out = vec4<f32>((ray.orig-aabb.min)/aabb_size,1.);
+    // if true {
+    // return;
+    // }
 
 
     let cam_bounds = extract_znear_zfar(camera.proj);
@@ -291,31 +319,48 @@ fn trace_ray_simple(
         let depth_ndc = (depth - znear) / (zfar - znear);
         
         let pos_ndc = vec3<f32>(pixel_pos.x,-pixel_pos.y, depth_ndc);
-        let sample_color = rescale_alpha(sample_cmap(sample_volume(ndc_to_world(
-            camera.proj_inv,
-            camera.view_inv,
-            pos_ndc
-        ))));
 
-
+        var sample_color = vec4<f32>(0.);
         var sample_dx = vec4<f32>(0.);
         var sample_dy = vec4<f32>(0.);
         var sample_dxy = vec4<f32>(0.);
 
 
-        color_grad(camera.proj_inv, camera.view_inv, pos_ndc, &sample_dx, &sample_dxy, &sample_dy);
-
-        if bool(settings.clamp_gradients) {
-            sample_dx = clamp(sample_dx, vec4<f32>(-1000.), vec4<f32>(1000.));
-            sample_dy = clamp(sample_dy, vec4<f32>(-1000.), vec4<f32>(1000.));
-            sample_dxy = clamp(sample_dxy, vec4<f32>(-1000.), vec4<f32>(1000.));
+        let inv_proj_inv_view = camera.view_inv * camera.proj_inv;
+        if settings.upscaling_method == INTERPOLATION_SPLINE {
+            sample_color_grad(inv_proj_inv_view, pos_ndc, &sample_color, &sample_dx, &sample_dxy, &sample_dy);
+        } else {
+            sample_color(inv_proj_inv_view, pos_ndc, &sample_color);
         }
+
+        // if bool(settings.clamp_gradients) {
+        //     let inv_width = 0.25*f32(camera.resolution.x);
+        //     let inv_height = 0.25*f32(camera.resolution.y);
+        //     let cutoff_x = settings.gradient_clamp_value_x;
+        //     let cutoff_y = settings.gradient_clamp_value_y;
+        //     let cutoff_xy = settings.gradient_clamp_value_xy;
+        //     sample_dx = clamp(sample_dx, vec4<f32>(-cutoff_x), vec4<f32>(cutoff_x));
+        //     sample_dy = clamp(sample_dy, vec4<f32>(-cutoff_y), vec4<f32>(cutoff_y));
+        //     sample_dxy = clamp(sample_dxy, vec4<f32>(-cutoff_xy), vec4<f32>(cutoff_xy));
+        // }
 
         blend_gradient(
             color,color_dx,color_dxy,color_dy,
             sample_color,sample_dx,sample_dxy,sample_dy,
             &color,&color_dx, &color_dxy, &color_dy,
         );
+
+        if bool(settings.clamp_gradients) {
+            let inv_width = 0.25*f32(camera.resolution.x);
+            let inv_height = 0.25*f32(camera.resolution.y);
+            let cutoff_x = settings.gradient_clamp_value_x;
+            let cutoff_y = settings.gradient_clamp_value_y;
+            let cutoff_xy = settings.gradient_clamp_value_xy;
+            color_dx = clamp(color_dx, vec4<f32>(-cutoff_x), vec4<f32>(cutoff_x));
+            color_dy = clamp(color_dy, vec4<f32>(-cutoff_y), vec4<f32>(cutoff_y));
+            color_dxy = clamp(color_dxy, vec4<f32>(-cutoff_xy), vec4<f32>(cutoff_xy));
+        }
+
 
         if color.a > 1.- early_stopping_t {
             break;
@@ -387,17 +432,6 @@ fn blend_gradient(a: vec4<f32>, a_dx: vec4<f32>, a_dxy: vec4<f32>, a_dy: vec4<f3
  }
 
 
-// fn ndc_to_world(ndc: vec3<f32>, inv_view: mat4x4<f32>, inv_proj: mat4x4<f32>) -> vec3<f32> {
-    
-//     // Transform NDC to clip space (homogeneous coordinates)
-//     let clip_space = vec4<f32>(ndc, 1.0);
-    
-//     // Transform to world space
-//     var world_space = inv_view * inv_proj * clip_space;
-//     // world_space /= world_space.w; # TODO we assume orthographic projection right now
-    
-//     return world_space.xyz;
-// }
 
 
 fn volumeRead3D(volume: texture_3d<f32>, loc:vec3<i32>,channel:i32)->f32{
@@ -408,6 +442,16 @@ fn volumeRead1D(tex: texture_2d<f32>, loc:i32,channel:i32)->f32{
     return textureLoad(tex,vec2<i32>(loc,0),0)[channel];
 }
 
+/// _h is just a dummy value to make the function signature match the one in the original code
+fn SampleCmap(cmap: texture_2d<f32>, value:f32,channel:i32)->f32{
+    return textureSample(cmap,cmap_sampler, vec2<f32>(value, 0.5))[channel];
+}
+
+fn sample_volume(volume: texture_3d<f32>, pos:vec3<f32>) -> f32 {
+    let pos_n = (pos-settings.volume_aabb.min) / (settings.volume_aabb.max-settings.volume_aabb.min);
+    return textureSample(volume, volume_sampler, pos_n).r;
+}
+
 fn textureSize3D(v: texture_3d<f32>,dim:i32) -> u32 {
     return textureDimensions(v)[dim];
 }
@@ -416,264 +460,243 @@ fn textureSize2D(v: texture_2d<f32>,dim:i32) -> u32 {
 }
 
 
+
 /// generated with sympy
-fn sample_volume(p: vec3<f32>) -> f32 {
-    let x0 = -settings.volume_aabb.min[2];
-    let x1 = (x0 + p[2])*f32(textureSize3D(volume, 2))/(x0 + settings.volume_aabb.max[2]) - 0.5;
-    let x2 = fract(x1);
-    let x3 = -settings.volume_aabb.min[1];
-    let x4 = (x3 + p[1])*f32(textureSize3D(volume, 1))/(x3 + settings.volume_aabb.max[1]) - 0.5;
-    let x5 = fract(x4);
-    let x6 = -settings.volume_aabb.min[0];
-    let x7 = (x6 + p[0])*f32(textureSize3D(volume, 0))/(x6 + settings.volume_aabb.max[0]) - 0.5;
-    let x8 = fract(x7);
-    let x9 = x5*x8;
-    let x10 = floor(x7);
-    let x11 = x10 + 1;
-    let x12 = floor(x4);
-    let x13 = x12 + 1;
-    let x14 = floor(x1);
-    let x15 = x14 + 1;
-    let x16 = 1 - x8;
-    let x17 = x16*x5;
-    let x18 = 1 - x5;
-    let x19 = x18*x8;
-    let x20 = 1 - x2;
-    let x21 = x16*x18;
- 
-    var sample_volume_result:f32;
-    sample_volume_result = x17*x2*volumeRead3D(volume, vec3<i32>(vec3<f32>(x10, x13, x15)), 0) + x17*x20*volumeRead3D(volume, vec3<i32>(vec3<f32>(x10, x13, x14)), 0) + x19*x2*volumeRead3D(volume, vec3<i32>(vec3<f32>(x11, x12, x15)), 0) + x19*x20*volumeRead3D(volume, vec3<i32>(vec3<f32>(x11, x12, x14)), 0) + x2*x21*volumeRead3D(volume, vec3<i32>(vec3<f32>(x10, x12, x15)), 0) + x2*x9*volumeRead3D(volume, vec3<i32>(vec3<f32>(x11, x13, x15)), 0) + x20*x21*volumeRead3D(volume, vec3<i32>(vec3<f32>(x10, x12, x14)), 0) + x20*x9*volumeRead3D(volume, vec3<i32>(vec3<f32>(x11, x13, x14)), 0);
-    return sample_volume_result;
- 
- }
- 
- /// generated with sympy
- fn sample_cmap(value: f32) -> vec4<f32> {
-    let x0 = -0.5 + (-settings.vmin + value)*f32(textureSize2D(cmap, 0))/(settings.vmax - settings.vmin);
-    let x1 = fract(x0);
-    let x2 = i32(floor(x0));
-    let x3 = x2 + 1;
-    let x4 = 1.0 - x1;
- 
-    var sample_cmap_result:vec4<f32>;
-    sample_cmap_result[0] = x1*volumeRead1D(cmap, x3, 0) + x4*volumeRead1D(cmap, x2, 0);
-    sample_cmap_result[1] = x1*volumeRead1D(cmap, x3, 1) + x4*volumeRead1D(cmap, x2, 1);
-    sample_cmap_result[2] = x1*volumeRead1D(cmap, x3, 2) + x4*volumeRead1D(cmap, x2, 2);
-    sample_cmap_result[3] = x1*volumeRead1D(cmap, x3, 3) + x4*volumeRead1D(cmap, x2, 3);
-    return sample_cmap_result;
- 
- }
- 
- /// generated with sympy
- fn ndc_to_world(inv_proj: mat4x4<f32>, inv_view: mat4x4<f32>, pos: vec3<f32>) -> vec3<f32> {
-    let x0 = 1.0*inv_proj[3][0];
-    let x1 = 1.0*inv_proj[3][1];
-    let x2 = 1.0*inv_proj[3][2];
-    let x3 = 1.0*inv_proj[3][3];
- 
-    var ndc_to_world_result:vec3<f32>;
-    ndc_to_world_result[0] = x0*inv_view[0][0] + x1*inv_view[1][0] + x2*inv_view[2][0] + x3*inv_view[3][0] + (inv_proj[0][0]*inv_view[0][0] + inv_proj[0][1]*inv_view[1][0] + inv_proj[0][2]*inv_view[2][0] + inv_proj[0][3]*inv_view[3][0])*pos[0] + (inv_proj[1][0]*inv_view[0][0] + inv_proj[1][1]*inv_view[1][0] + inv_proj[1][2]*inv_view[2][0] + inv_proj[1][3]*inv_view[3][0])*pos[1] + (inv_proj[2][0]*inv_view[0][0] + inv_proj[2][1]*inv_view[1][0] + inv_proj[2][2]*inv_view[2][0] + inv_proj[2][3]*inv_view[3][0])*pos[2];
-    ndc_to_world_result[1] = x0*inv_view[0][1] + x1*inv_view[1][1] + x2*inv_view[2][1] + x3*inv_view[3][1] + (inv_proj[0][0]*inv_view[0][1] + inv_proj[0][1]*inv_view[1][1] + inv_proj[0][2]*inv_view[2][1] + inv_proj[0][3]*inv_view[3][1])*pos[0] + (inv_proj[1][0]*inv_view[0][1] + inv_proj[1][1]*inv_view[1][1] + inv_proj[1][2]*inv_view[2][1] + inv_proj[1][3]*inv_view[3][1])*pos[1] + (inv_proj[2][0]*inv_view[0][1] + inv_proj[2][1]*inv_view[1][1] + inv_proj[2][2]*inv_view[2][1] + inv_proj[2][3]*inv_view[3][1])*pos[2];
-    ndc_to_world_result[2] = x0*inv_view[0][2] + x1*inv_view[1][2] + x2*inv_view[2][2] + x3*inv_view[3][2] + (inv_proj[0][0]*inv_view[0][2] + inv_proj[0][1]*inv_view[1][2] + inv_proj[0][2]*inv_view[2][2] + inv_proj[0][3]*inv_view[3][2])*pos[0] + (inv_proj[1][0]*inv_view[0][2] + inv_proj[1][1]*inv_view[1][2] + inv_proj[1][2]*inv_view[2][2] + inv_proj[1][3]*inv_view[3][2])*pos[1] + (inv_proj[2][0]*inv_view[0][2] + inv_proj[2][1]*inv_view[1][2] + inv_proj[2][2]*inv_view[2][2] + inv_proj[2][3]*inv_view[3][2])*pos[2];
-    return ndc_to_world_result;
- 
- }
- 
- /// generated with sympy
- fn rescale_alpha(color: vec4<f32>) -> vec4<f32> {
- 
-    var rescale_alpha_result:vec4<f32>;
-    rescale_alpha_result[0] = color[0];
-    rescale_alpha_result[1] = color[1];
-    rescale_alpha_result[2] = color[2];
-    rescale_alpha_result[3] = 1 - pow(1 - 0.996078431372549*color[3], settings.distance_scale*settings.step_size);
-    return rescale_alpha_result;
- 
- }
- 
- /// generated with sympy
- fn color_grad(inv_proj: mat4x4<f32>, inv_view: mat4x4<f32>, pos_ndc: vec3<f32>, color_dx: ptr<function,vec4<f32>>, color_dxy: ptr<function,vec4<f32>>, color_dy: ptr<function,vec4<f32>>) {
-    let x0 = -settings.vmin;
-    let x1 = f32(textureSize2D(cmap, 0))/(settings.vmax + x0);
-    let x2 = f32(textureSize3D(volume, 2));
-    let x3 = -settings.volume_aabb.min[2];
-    let x4 = 1.0/(x3 + settings.volume_aabb.max[2]);
-    let x5 = 1.0*inv_proj[3][0];
-    let x6 = 1.0*inv_proj[3][1];
-    let x7 = 1.0*inv_proj[3][2];
-    let x8 = 1.0*inv_proj[3][3];
-    let x9 = inv_proj[0][0]*inv_view[0][2] + inv_proj[0][1]*inv_view[1][2] + inv_proj[0][2]*inv_view[2][2] + inv_proj[0][3]*inv_view[3][2];
-    let x10 = inv_proj[1][0]*inv_view[0][2] + inv_proj[1][1]*inv_view[1][2] + inv_proj[1][2]*inv_view[2][2] + inv_proj[1][3]*inv_view[3][2];
-    let x11 = x2*x4*(x10*pos_ndc[1] + x3 + x5*inv_view[0][2] + x6*inv_view[1][2] + x7*inv_view[2][2] + x8*inv_view[3][2] + x9*pos_ndc[0] + (inv_proj[2][0]*inv_view[0][2] + inv_proj[2][1]*inv_view[1][2] + inv_proj[2][2]*inv_view[2][2] + inv_proj[2][3]*inv_view[3][2])*pos_ndc[2]) - 0.5;
-    let x12 = fract(x11);
-    let x13 = f32(textureSize3D(volume, 1));
-    let x14 = -settings.volume_aabb.min[1];
-    let x15 = 1.0/(x14 + settings.volume_aabb.max[1]);
-    let x16 = inv_proj[0][0]*inv_view[0][1] + inv_proj[0][1]*inv_view[1][1] + inv_proj[0][2]*inv_view[2][1] + inv_proj[0][3]*inv_view[3][1];
-    let x17 = inv_proj[1][0]*inv_view[0][1] + inv_proj[1][1]*inv_view[1][1] + inv_proj[1][2]*inv_view[2][1] + inv_proj[1][3]*inv_view[3][1];
-    let x18 = x13*x15*(x14 + x16*pos_ndc[0] + x17*pos_ndc[1] + x5*inv_view[0][1] + x6*inv_view[1][1] + x7*inv_view[2][1] + x8*inv_view[3][1] + (inv_proj[2][0]*inv_view[0][1] + inv_proj[2][1]*inv_view[1][1] + inv_proj[2][2]*inv_view[2][1] + inv_proj[2][3]*inv_view[3][1])*pos_ndc[2]) - 0.5;
-    let x19 = fract(x18);
-    let x20 = f32(textureSize3D(volume, 0));
-    let x21 = -settings.volume_aabb.min[0];
-    let x22 = 1.0/(x21 + settings.volume_aabb.max[0]);
-    let x23 = inv_proj[0][0]*inv_view[0][0] + inv_proj[0][1]*inv_view[1][0] + inv_proj[0][2]*inv_view[2][0] + inv_proj[0][3]*inv_view[3][0];
-    let x24 = inv_proj[1][0]*inv_view[0][0] + inv_proj[1][1]*inv_view[1][0] + inv_proj[1][2]*inv_view[2][0] + inv_proj[1][3]*inv_view[3][0];
-    let x25 = x20*x22*(x21 + x23*pos_ndc[0] + x24*pos_ndc[1] + x5*inv_view[0][0] + x6*inv_view[1][0] + x7*inv_view[2][0] + x8*inv_view[3][0] + (inv_proj[2][0]*inv_view[0][0] + inv_proj[2][1]*inv_view[1][0] + inv_proj[2][2]*inv_view[2][0] + inv_proj[2][3]*inv_view[3][0])*pos_ndc[2]) - 0.5;
-    let x26 = fract(x25);
-    let x27 = x19*x26;
-    let x28 = floor(x25);
-    let x29 = x28 + 1;
-    let x30 = floor(x18);
-    let x31 = x30 + 1;
-    let x32 = floor(x11);
-    let x33 = x32 + 1;
-    let x34 = volumeRead3D(volume, vec3<i32>(vec3<f32>(x29, x31, x33)), 0);
-    let x35 = x26 - 1;
-    let x36 = -x35;
-    let x37 = x19*x36;
-    let x38 = volumeRead3D(volume, vec3<i32>(vec3<f32>(x28, x31, x33)), 0);
-    let x39 = x19 - 1;
-    let x40 = -x39;
-    let x41 = x26*x40;
-    let x42 = volumeRead3D(volume, vec3<i32>(vec3<f32>(x29, x30, x33)), 0);
-    let x43 = x12 - 1;
-    let x44 = -x43;
-    let x45 = volumeRead3D(volume, vec3<i32>(vec3<f32>(x29, x31, x32)), 0);
-    let x46 = x36*x40;
-    let x47 = volumeRead3D(volume, vec3<i32>(vec3<f32>(x28, x30, x33)), 0);
-    let x48 = volumeRead3D(volume, vec3<i32>(vec3<f32>(x28, x31, x32)), 0);
-    let x49 = volumeRead3D(volume, vec3<i32>(vec3<f32>(x29, x30, x32)), 0);
-    let x50 = volumeRead3D(volume, vec3<i32>(vec3<f32>(x28, x30, x32)), 0);
-    let x51 = x1*(x0 + x12*x27*x34 + x12*x37*x38 + x12*x41*x42 + x12*x46*x47 + x27*x44*x45 + x37*x44*x48 + x41*x44*x49 + x44*x46*x50) - 0.5;
-    let x52 = i32(floor(x51));
-    let x53 = volumeRead1D(cmap, x52, 0);
-    let x54 = x20*x22;
-    let x55 = x23*x54;
-    let x56 = x40*x55;
-    let x57 = x44*x56;
-    let x58 = x12*x56;
-    let x59 = x19*x55;
-    let x60 = x44*x59;
-    let x61 = x13*x15;
-    let x62 = x16*x61;
-    let x63 = x36*x62;
-    let x64 = x44*x63;
-    let x65 = x12*x63;
-    let x66 = x26*x62;
-    let x67 = x44*x66;
-    let x68 = x2*x4;
-    let x69 = x68*x9;
-    let x70 = x46*x69;
-    let x71 = x37*x69;
-    let x72 = x41*x69;
-    let x73 = x12*x59;
-    let x74 = x12*x66;
-    let x75 = x27*x69;
-    let x76 = x34*x73 + x34*x74 + x34*x75 - x38*x73 - x42*x74 - x45*x75;
-    let x77 = x38*x65 + x38*x71 + x42*x58 + x42*x72 + x45*x60 + x45*x67 - x47*x58 - x47*x65 + x47*x70 - x48*x60 + x48*x64 - x48*x71 + x49*x57 - x49*x67 - x49*x72 - x50*x57 - x50*x64 - x50*x70 + x76;
-    let x78 = x52 + 1;
-    let x79 = volumeRead1D(cmap, x78, 0);
-    let x80 = volumeRead1D(cmap, x52, 1);
-    let x81 = volumeRead1D(cmap, x78, 1);
-    let x82 = volumeRead1D(cmap, x52, 2);
-    let x83 = volumeRead1D(cmap, x78, 2);
-    let x84 = settings.distance_scale*settings.step_size;
-    let x85 = 0.996078431372549*x84;
-    let x86 = volumeRead1D(cmap, x78, 3);
-    let x87 = fract(x51);
-    let x88 = volumeRead1D(cmap, x52, 3);
-    let x89 = -0.996078431372549*x86*x87 - 0.996078431372549*x88*(1.0 - x87) + 1;
-    let x90 = pow(x89, x84);
-    let x91 = 1.0/x89;
-    let x92 = x24*x54;
-    let x93 = x40*x92;
-    let x94 = x44*x93;
-    let x95 = x12*x93;
-    let x96 = x19*x92;
-    let x97 = x44*x96;
-    let x98 = x17*x61;
-    let x99 = x36*x98;
-    let x100 = x44*x99;
-    let x101 = x12*x99;
-    let x102 = x26*x98;
-    let x103 = x102*x44;
-    let x104 = x10*x68;
-    let x105 = x104*x46;
-    let x106 = x104*x37;
-    let x107 = x104*x41;
-    let x108 = x12*x96;
-    let x109 = x102*x12;
-    let x110 = x104*x27;
-    let x111 = x108*x34 - x108*x38 + x109*x34 - x109*x42 + x110*x34 - x110*x45;
-    let x112 = x100*x48 - x100*x50 + x101*x38 - x101*x47 + x103*x45 - x103*x49 + x105*x47 - x105*x50 + x106*x38 - x106*x48 + x107*x42 - x107*x49 + x111 + x42*x95 + x45*x97 - x47*x95 - x48*x97 + x49*x94 - x50*x94;
-    let x113 = x35*x39;
-    let x114 = x19*x35;
-    let x115 = x26*x39;
-    let x116 = x1*(-settings.vmin - x113*x43*x50 - x114*x12*x38 - x115*x12*x42 + x12*x19*x26*x34 + x12*x35*x39*x47 + x19*x35*x43*x48 + x26*x39*x43*x49 - x27*x43*x45) - 0.5;
-    let x117 = i32(floor(x116));
-    let x118 = x55*x98;
-    let x119 = x118*x12;
-    let x120 = x62*x92;
-    let x121 = x12*x120;
-    let x122 = x104*x59;
-    let x123 = x69*x96;
-    let x124 = x104*x66;
-    let x125 = x102*x69;
-    let x126 = x35*x62;
-    let x127 = x104*x126;
-    let x128 = x35*x98;
-    let x129 = x128*x69;
-    let x130 = x39*x55;
-    let x131 = x104*x130;
-    let x132 = x39*x92;
-    let x133 = x132*x69;
-    let x134 = x118*x43;
-    let x135 = x120*x43;
-    let x136 = x119*x34 - x119*x38 - x119*x42 + x119*x47 + x121*x34 - x121*x38 - x121*x42 + x121*x47 + x122*x34 - x122*x38 - x122*x45 + x122*x48 + x123*x34 - x123*x38 - x123*x45 + x123*x48 + x124*x34 - x124*x42 - x124*x45 + x124*x49 + x125*x34 - x125*x42 - x125*x45 + x125*x49 - x127*x38 + x127*x47 + x127*x48 - x127*x50 - x129*x38 + x129*x47 + x129*x48 - x129*x50 - x131*x42 + x131*x47 + x131*x49 - x131*x50 - x133*x42 + x133*x47 + x133*x49 - x133*x50 - x134*x45 + x134*x48 + x134*x49 - x134*x50 - x135*x45 + x135*x48 + x135*x49 - x135*x50;
-    let x137 = x117 + 1;
-    let x138 = volumeRead1D(cmap, x137, 3);
-    let x139 = fract(x116);
-    let x140 = volumeRead1D(cmap, x117, 3);
-    let x141 = -0.996078431372549*x138*x139 - 0.996078431372549*x140*(1.0 - x139) + 1;
-    let x142 = pow(x141, x84);
-    let x143 = 1.0/x141;
-    let x144 = 0.992172241445598*x1;
-    let x145 = x130*x43;
-    let x146 = x12*x130;
-    let x147 = x43*x59;
-    let x148 = x126*x43;
-    let x149 = x12*x126;
-    let x150 = x43*x66;
-    let x151 = x113*x69;
-    let x152 = x114*x69;
-    let x153 = x115*x69;
-    let x154 = x145*x49 - x145*x50 - x146*x42 + x146*x47 - x147*x45 + x147*x48 + x148*x48 - x148*x50 - x149*x38 + x149*x47 - x150*x45 + x150*x49 + x151*x47 - x151*x50 - x152*x38 + x152*x48 - x153*x42 + x153*x49 + x76;
-    let x155 = x138*x154 - x140*x154;
-    let x156 = x132*x43;
-    let x157 = x12*x132;
-    let x158 = x43*x96;
-    let x159 = x128*x43;
-    let x160 = x12*x128;
-    let x161 = x102*x43;
-    let x162 = x104*x113;
-    let x163 = x104*x114;
-    let x164 = x104*x115;
-    let x165 = x111 + x156*x49 - x156*x50 - x157*x42 + x157*x47 - x158*x45 + x158*x48 + x159*x48 - x159*x50 - x160*x38 + x160*x47 - x161*x45 + x161*x49 + x162*x47 - x162*x50 - x163*x38 + x163*x48 - x164*x42 + x164*x49;
-    let x166 = x138*x165 - x140*x165;
- 
-    (*color_dx)[0] = -x1*x53*x77 + x1*x77*x79;
-    (*color_dx)[1] = -x1*x77*x80 + x1*x77*x81;
-    (*color_dx)[2] = -x1*x77*x82 + x1*x77*x83;
-    (*color_dx)[3] = x85*x90*x91*(x1*x77*x86 - x1*x77*x88);
-    (*color_dxy)[0] = x1*(-x136*volumeRead1D(cmap, x117, 0) + x136*volumeRead1D(cmap, x137, 0));
-    (*color_dxy)[1] = x1*(-x136*volumeRead1D(cmap, x117, 1) + x136*volumeRead1D(cmap, x137, 1));
-    (*color_dxy)[2] = x1*(-x136*volumeRead1D(cmap, x117, 2) + x136*volumeRead1D(cmap, x137, 2));
-    (*color_dxy)[3] = x1*x84*(-x142*pow(x143, 2.0)*x144*x155*x166*x84 + x142*pow(x143, 2.0)*x144*x155*x166 + 0.996078431372549*x142*x143*(x136*x138 - x136*x140));
-    (*color_dy)[0] = -x1*x112*x53 + x1*x112*x79;
-    (*color_dy)[1] = -x1*x112*x80 + x1*x112*x81;
-    (*color_dy)[2] = -x1*x112*x82 + x1*x112*x83;
-    (*color_dy)[3] = x85*x90*x91*(x1*x112*x86 - x1*x112*x88);
- 
- }
- 
- 
+fn sample_color_grad(inv_proj_inv_view: mat4x4<f32>, pos_ndc: vec3<f32>, color: ptr<function,vec4<f32>>, color_dx: ptr<function,vec4<f32>>, color_dxy: ptr<function,vec4<f32>>, color_dy: ptr<function,vec4<f32>>) {
+   let x0 = -settings.vmin;
+   let x1 = 1.0/(settings.vmax + x0);
+   let x2 = f32(textureSize3D(volume, 2));
+   let x3 = -settings.volume_aabb.min[2];
+   let x4 = 1.0/(x3 + settings.volume_aabb.max[2]);
+   let x5 = x2*x4*(x3 + inv_proj_inv_view[0][2]*pos_ndc[0] + inv_proj_inv_view[1][2]*pos_ndc[1] + inv_proj_inv_view[2][2]*pos_ndc[2] + 1.0*inv_proj_inv_view[3][2]) - 0.5;
+   let x6 = fract(x5);
+   let x7 = f32(textureSize3D(volume, 1));
+   let x8 = -settings.volume_aabb.min[1];
+   let x9 = 1.0/(x8 + settings.volume_aabb.max[1]);
+   let x10 = x7*x9*(x8 + inv_proj_inv_view[0][1]*pos_ndc[0] + inv_proj_inv_view[1][1]*pos_ndc[1] + inv_proj_inv_view[2][1]*pos_ndc[2] + 1.0*inv_proj_inv_view[3][1]) - 0.5;
+   let x11 = fract(x10);
+   let x12 = f32(textureSize3D(volume, 0));
+   let x13 = -settings.volume_aabb.min[0];
+   let x14 = 1.0/(x13 + settings.volume_aabb.max[0]);
+   let x15 = x12*x14*(x13 + inv_proj_inv_view[0][0]*pos_ndc[0] + inv_proj_inv_view[1][0]*pos_ndc[1] + inv_proj_inv_view[2][0]*pos_ndc[2] + 1.0*inv_proj_inv_view[3][0]) - 0.5;
+   let x16 = fract(x15);
+   let x17 = x11*x16;
+   let x18 = floor(x15);
+   let x19 = x18 + 1;
+   let x20 = floor(x10);
+   let x21 = x20 + 1;
+   let x22 = floor(x5);
+   let x23 = x22 + 1;
+   let x24 = volumeRead3D(volume, vec3<i32>(vec3<f32>(x19, x21, x23)), 0);
+   let x25 = x16 - 1;
+   let x26 = -x25;
+   let x27 = x11*x26;
+   let x28 = volumeRead3D(volume, vec3<i32>(vec3<f32>(x18, x21, x23)), 0);
+   let x29 = x11 - 1;
+   let x30 = -x29;
+   let x31 = x16*x30;
+   let x32 = volumeRead3D(volume, vec3<i32>(vec3<f32>(x19, x20, x23)), 0);
+   let x33 = x6 - 1;
+   let x34 = -x33;
+   let x35 = volumeRead3D(volume, vec3<i32>(vec3<f32>(x19, x21, x22)), 0);
+   let x36 = x26*x30;
+   let x37 = volumeRead3D(volume, vec3<i32>(vec3<f32>(x18, x20, x23)), 0);
+   let x38 = volumeRead3D(volume, vec3<i32>(vec3<f32>(x18, x21, x22)), 0);
+   let x39 = volumeRead3D(volume, vec3<i32>(vec3<f32>(x19, x20, x22)), 0);
+   let x40 = volumeRead3D(volume, vec3<i32>(vec3<f32>(x18, x20, x22)), 0);
+   let x41 = x1*(x0 + x17*x24*x6 + x17*x34*x35 + x27*x28*x6 + x27*x34*x38 + x31*x32*x6 + x31*x34*x39 + x34*x36*x40 + x36*x37*x6);
+   let x42 = 1 - 0.996078431372549*SampleCmap(cmap, x41, 3);
+   let x43 = settings.distance_scale*settings.step_size;
+   let x44 = pow(x42, x43);
+   let x45 = -settings.cmap_grad_clip;
+   let x46 = 1.0/settings.cmap_fd_h;
+   let x47 = (1.0/2.0)*settings.cmap_fd_h;
+   let x48 = x41 + x47;
+   let x49 = x41 - x47;
+   let x50 = x1*min(settings.cmap_grad_clip, max(x45, f32(x46*(SampleCmap(cmap, x48, 0) - SampleCmap(cmap, x49, 0)))));
+   let x51 = x12*x14;
+   let x52 = x51*inv_proj_inv_view[0][0];
+   let x53 = x30*x52;
+   let x54 = x34*x53;
+   let x55 = x53*x6;
+   let x56 = x11*x52;
+   let x57 = x34*x56;
+   let x58 = x7*x9;
+   let x59 = x58*inv_proj_inv_view[0][1];
+   let x60 = x26*x59;
+   let x61 = x34*x60;
+   let x62 = x6*x60;
+   let x63 = x16*x59;
+   let x64 = x34*x63;
+   let x65 = x2*x4;
+   let x66 = x65*inv_proj_inv_view[0][2];
+   let x67 = x36*x66;
+   let x68 = x27*x66;
+   let x69 = x31*x66;
+   let x70 = x56*x6;
+   let x71 = x6*x63;
+   let x72 = x17*x66;
+   let x73 = x24*x70 + x24*x71 + x24*x72 - x28*x70 - x32*x71 - x35*x72;
+   let x74 = x28*x62 + x28*x68 + x32*x55 + x32*x69 + x35*x57 + x35*x64 - x37*x55 - x37*x62 + x37*x67 - x38*x57 + x38*x61 - x38*x68 + x39*x54 - x39*x64 - x39*x69 - x40*x54 - x40*x61 - x40*x67 + x73;
+   let x75 = x1*min(settings.cmap_grad_clip, max(x45, f32(x46*(SampleCmap(cmap, x48, 1) - SampleCmap(cmap, x49, 1)))));
+   let x76 = x1*min(settings.cmap_grad_clip, max(x45, f32(x46*(SampleCmap(cmap, x48, 2) - SampleCmap(cmap, x49, 2)))));
+   let x77 = x1*x43;
+   let x78 = 0.996078431372549*x77*min(settings.cmap_grad_clip, max(x45, f32(x46*(SampleCmap(cmap, x48, 3) - SampleCmap(cmap, x49, 3)))));
+   let x79 = 1.0/x42;
+   let x80 = x51*inv_proj_inv_view[1][0];
+   let x81 = x30*x80;
+   let x82 = x34*x81;
+   let x83 = x6*x81;
+   let x84 = x11*x80;
+   let x85 = x34*x84;
+   let x86 = x58*inv_proj_inv_view[1][1];
+   let x87 = x26*x86;
+   let x88 = x34*x87;
+   let x89 = x6*x87;
+   let x90 = x16*x86;
+   let x91 = x34*x90;
+   let x92 = x65*inv_proj_inv_view[1][2];
+   let x93 = x36*x92;
+   let x94 = x27*x92;
+   let x95 = x31*x92;
+   let x96 = x6*x84;
+   let x97 = x6*x90;
+   let x98 = x17*x92;
+   let x99 = x24*x96 + x24*x97 + x24*x98 - x28*x96 - x32*x97 - x35*x98;
+   let x100 = x28*x89 + x28*x94 + x32*x83 + x32*x95 + x35*x85 + x35*x91 - x37*x83 - x37*x89 + x37*x93 - x38*x85 + x38*x88 - x38*x94 + x39*x82 - x39*x91 - x39*x95 - x40*x82 - x40*x88 - x40*x93 + x99;
+   let x101 = x25*x29;
+   let x102 = x11*x25;
+   let x103 = x16*x29;
+   let x104 = -settings.vmin - x101*x33*x40 - x102*x28*x6 - x103*x32*x6 + x11*x16*x24*x6 + x11*x25*x33*x38 + x16*x29*x33*x39 - x17*x33*x35 + x25*x29*x37*x6;
+   let x105 = 2*x1*x104;
+   let x106 = (1.0/2.0)*settings.cmap_fd_h + (1.0/2.0)*x105;
+   let x107 = -settings.cmap_fd_h;
+   let x108 = (1.0/2.0)*x105 + (1.0/2.0)*x107;
+   let x109 = f32(x46*(SampleCmap(cmap, x106, 0) - SampleCmap(cmap, x108, 0)));
+   let x110 = max(x109, x45);
+   let x111 = x52*x86;
+   let x112 = x111*x6;
+   let x113 = x59*x80;
+   let x114 = x113*x6;
+   let x115 = x56*x92;
+   let x116 = x66*x84;
+   let x117 = x63*x92;
+   let x118 = x66*x90;
+   let x119 = x25*x59;
+   let x120 = x119*x92;
+   let x121 = x25*x86;
+   let x122 = x121*x66;
+   let x123 = x29*x52;
+   let x124 = x123*x92;
+   let x125 = x29*x80;
+   let x126 = x125*x66;
+   let x127 = x111*x33;
+   let x128 = x113*x33;
+   let x129 = x112*x24 - x112*x28 - x112*x32 + x112*x37 + x114*x24 - x114*x28 - x114*x32 + x114*x37 + x115*x24 - x115*x28 - x115*x35 + x115*x38 + x116*x24 - x116*x28 - x116*x35 + x116*x38 + x117*x24 - x117*x32 - x117*x35 + x117*x39 + x118*x24 - x118*x32 - x118*x35 + x118*x39 - x120*x28 + x120*x37 + x120*x38 - x120*x40 - x122*x28 + x122*x37 + x122*x38 - x122*x40 - x124*x32 + x124*x37 + x124*x39 - x124*x40 - x126*x32 + x126*x37 + x126*x39 - x126*x40 - x127*x35 + x127*x38 + x127*x39 - x127*x40 - x128*x35 + x128*x38 + x128*x39 - x128*x40;
+   let x130 = x1*x46;
+   let x131 = x1*x104;
+   let x132 = SampleCmap(cmap, x131, 0);
+   let x133 = settings.cmap_fd_h + x131;
+   let x134 = x125*x33;
+   let x135 = x125*x6;
+   let x136 = x33*x84;
+   let x137 = x121*x33;
+   let x138 = x121*x6;
+   let x139 = x33*x90;
+   let x140 = x101*x92;
+   let x141 = x102*x92;
+   let x142 = x103*x92;
+   let x143 = x134*x39 - x134*x40 - x135*x32 + x135*x37 - x136*x35 + x136*x38 + x137*x38 - x137*x40 - x138*x28 + x138*x37 - x139*x35 + x139*x39 + x140*x37 - x140*x40 - x141*x28 + x141*x38 - x142*x32 + x142*x39 + x99;
+   let x144 = x107 + x131;
+   let x145 = x123*x33;
+   let x146 = x123*x6;
+   let x147 = x33*x56;
+   let x148 = x119*x33;
+   let x149 = x119*x6;
+   let x150 = x33*x63;
+   let x151 = x101*x66;
+   let x152 = x102*x66;
+   let x153 = x103*x66;
+   let x154 = x145*x39 - x145*x40 - x146*x32 + x146*x37 - x147*x35 + x147*x38 + x148*x38 - x148*x40 - x149*x28 + x149*x37 - x150*x35 + x150*x39 + x151*x37 - x151*x40 - x152*x28 + x152*x38 - x153*x32 + x153*x39 + x73;
+   let x155 = f32(x46*(SampleCmap(cmap, x106, 1) - SampleCmap(cmap, x108, 1)));
+   let x156 = max(x155, x45);
+   let x157 = SampleCmap(cmap, x131, 1);
+   let x158 = f32(x46*(SampleCmap(cmap, x106, 2) - SampleCmap(cmap, x108, 2)));
+   let x159 = max(x158, x45);
+   let x160 = SampleCmap(cmap, x131, 2);
+   let x161 = f32(x46*(SampleCmap(cmap, x106, 3) - SampleCmap(cmap, x108, 3)));
+   let x162 = max(x161, x45);
+   let x163 = min(settings.cmap_grad_clip, x162);
+   let x164 = SampleCmap(cmap, x131, 3);
+   let x165 = 1 - 0.996078431372549*x164;
+   let x166 = pow(x165, x43);
+   let x167 = 1.0/x165;
+   let x168 = 0.992172241445598*x1*pow(x163, 2.0);
+
+   (*color)[0] = SampleCmap(cmap, x41, 0);
+   (*color)[1] = SampleCmap(cmap, x41, 1);
+   (*color)[2] = SampleCmap(cmap, x41, 2);
+   (*color)[3] = 1 - x44;
+   (*color_dx)[0] = x50*x74;
+   (*color_dx)[1] = x74*x75;
+   (*color_dx)[2] = x74*x76;
+   (*color_dx)[3] = x44*x74*x78*x79;
+   (*color_dxy)[0] = x1*(x129*min(settings.cmap_grad_clip, x110) + x154*step(0.,-(settings.cmap_grad_clip + x109))*step(0.,-(settings.cmap_grad_clip - x110))*f32(x130*(x143*min(settings.cmap_grad_clip, max(x45, f32(x46*(-x132 + SampleCmap(cmap, x133, 0))))) - x143*min(settings.cmap_grad_clip, max(x45, f32(x46*(x132 - SampleCmap(cmap, x144, 0))))))));
+   (*color_dxy)[1] = x1*(x129*min(settings.cmap_grad_clip, x156) + x154*step(0.,-(settings.cmap_grad_clip + x155))*step(0.,-(settings.cmap_grad_clip - x156))*f32(x130*(x143*min(settings.cmap_grad_clip, max(x45, f32(x46*(-x157 + SampleCmap(cmap, x133, 1))))) - x143*min(settings.cmap_grad_clip, max(x45, f32(x46*(x157 - SampleCmap(cmap, x144, 1))))))));
+   (*color_dxy)[2] = x1*(x129*min(settings.cmap_grad_clip, x159) + x154*step(0.,-(settings.cmap_grad_clip + x158))*step(0.,-(settings.cmap_grad_clip - x159))*f32(x130*(x143*min(settings.cmap_grad_clip, max(x45, f32(x46*(-x160 + SampleCmap(cmap, x133, 2))))) - x143*min(settings.cmap_grad_clip, max(x45, f32(x46*(x160 - SampleCmap(cmap, x144, 2))))))));
+   (*color_dxy)[3] = x77*(0.996078431372549*x129*x163*x166*x167 - x143*x154*x166*pow(x167, 2.0)*x168*x43 + x143*x154*x166*pow(x167, 2.0)*x168 + 0.996078431372549*x154*x166*x167*step(0.,-(settings.cmap_grad_clip + x161))*step(0.,-(settings.cmap_grad_clip - x162))*f32(x130*(x143*min(settings.cmap_grad_clip, max(x45, f32(x46*(-x164 + SampleCmap(cmap, x133, 3))))) - x143*min(settings.cmap_grad_clip, max(x45, f32(x46*(x164 - SampleCmap(cmap, x144, 3))))))));
+   (*color_dy)[0] = x100*x50;
+   (*color_dy)[1] = x100*x75;
+   (*color_dy)[2] = x100*x76;
+   (*color_dy)[3] = x100*x44*x78*x79;
+
+}
+
+
+
+/// generated with sympy
+fn sample_color(inv_proj_inv_view: mat4x4<f32>, pos_ndc: vec3<f32>, color: ptr<function,vec4<f32>>) {
+   let x0 = -settings.vmin;
+   let x1 = (x0 + sample_volume_manual(volume, vec3<f32>(inv_proj_inv_view[0][0]*pos_ndc[0] + inv_proj_inv_view[1][0]*pos_ndc[1] + inv_proj_inv_view[2][0]*pos_ndc[2] + 1.0*inv_proj_inv_view[3][0], inv_proj_inv_view[0][1]*pos_ndc[0] + inv_proj_inv_view[1][1]*pos_ndc[1] + inv_proj_inv_view[2][1]*pos_ndc[2] + 1.0*inv_proj_inv_view[3][1], inv_proj_inv_view[0][2]*pos_ndc[0] + inv_proj_inv_view[1][2]*pos_ndc[1] + inv_proj_inv_view[2][2]*pos_ndc[2] + 1.0*inv_proj_inv_view[3][2])))/(settings.vmax + x0);
+
+   (*color)[0] = SampleCmap(cmap, x1, 0);
+   (*color)[1] = SampleCmap(cmap, x1, 1);
+   (*color)[2] = SampleCmap(cmap, x1, 2);
+   (*color)[3] = 1 - pow(1 - 0.996078431372549*SampleCmap(cmap, x1, 3), settings.distance_scale*settings.step_size);
+
+}
+
+
+/// generated with sympy
+fn sample_volume_manual(volume: texture_3d<f32>,pos: vec3<f32>) -> f32 {
+    // if bool(settings.hardware_interpolation){
+    //     return sample_volume(volume, pos);
+    // }
+   let x0 = -settings.volume_aabb.min[2];
+   let x1 = (x0 + pos[2])*f32(textureSize3D(volume, 2))/(x0 + settings.volume_aabb.max[2]) - 0.5;
+   let x2 = fract(x1);
+   let x3 = -settings.volume_aabb.min[1];
+   let x4 = (x3 + pos[1])*f32(textureSize3D(volume, 1))/(x3 + settings.volume_aabb.max[1]) - 0.5;
+   let x5 = fract(x4);
+   let x6 = -settings.volume_aabb.min[0];
+   let x7 = (x6 + pos[0])*f32(textureSize3D(volume, 0))/(x6 + settings.volume_aabb.max[0]) - 0.5;
+   let x8 = fract(x7);
+   let x9 = x5*x8;
+   let x10 = floor(x7);
+   let x11 = x10 + 1;
+   let x12 = floor(x4);
+   let x13 = x12 + 1;
+   let x14 = floor(x1);
+   let x15 = x14 + 1;
+   let x16 = 1 - x8;
+   let x17 = x16*x5;
+   let x18 = 1 - x5;
+   let x19 = x18*x8;
+   let x20 = 1 - x2;
+   let x21 = x16*x18;
+
+   var sample_volume_manual_result:f32;
+   sample_volume_manual_result = x17*x2*volumeRead3D(volume, vec3<i32>(vec3<f32>(x10, x13, x15)), 0) + x17*x20*volumeRead3D(volume, vec3<i32>(vec3<f32>(x10, x13, x14)), 0) + x19*x2*volumeRead3D(volume, vec3<i32>(vec3<f32>(x11, x12, x15)), 0) + x19*x20*volumeRead3D(volume, vec3<i32>(vec3<f32>(x11, x12, x14)), 0) + x2*x21*volumeRead3D(volume, vec3<i32>(vec3<f32>(x10, x12, x15)), 0) + x2*x9*volumeRead3D(volume, vec3<i32>(vec3<f32>(x11, x13, x15)), 0) + x20*x21*volumeRead3D(volume, vec3<i32>(vec3<f32>(x10, x12, x14)), 0) + x20*x9*volumeRead3D(volume, vec3<i32>(vec3<f32>(x11, x13, x14)), 0);
+   return sample_volume_manual_result;
+
+}

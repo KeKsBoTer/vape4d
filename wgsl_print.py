@@ -166,6 +166,12 @@ class WGSLPrinter(CodePrinter):
             return '(*{})'.format(name)
         else:
             return name
+        
+    def _print_Heaviside(self, expr):
+        # Heaviside function is not supported in WGSL
+        # but we can use a piecewise function to implement it
+        arg = self._print(expr.args[0])
+        return f"step(0.,-({arg}))"
 
     def _print_SparseRepMatrix(self, mat):
         # do not allow sparse matrices to be made dense
@@ -190,6 +196,7 @@ class WGSLPrinter(CodePrinter):
         else:
             rows,cols = expr.parent.shape
             i,j = expr.i,expr.j
+            
         pnt = self._print_Symbol(expr.parent)
         if wgsl_types and ((rows <= 4 and cols <=4 and cols > 1) or nest):
             return "{}[{}][{}]".format(pnt, i, j)
@@ -249,11 +256,8 @@ class WGSLPrinter(CodePrinter):
         arg, = expr.args
         return 'return %s;' % self._print(arg)
 
-    
     def _print_FloatBaseType(self, flt):
         return "f32"
-    
-    
         
     def _print_FunctionPrototype(self, expr):
         pars = ', '.join((self._print(Declaration(arg)) for arg in expr.parameters))
@@ -324,6 +328,7 @@ class WGSLPrinter(CodePrinter):
             return false_branch
 
     def _print_Indexed(self, expr):
+        print("indexed")
         # calculate index for 1d array
         dims = expr.shape
         elem = S.Zero

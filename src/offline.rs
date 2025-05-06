@@ -1,10 +1,12 @@
-use cgmath::{Vector2, Vector3};
+use cgmath::{InnerSpace, Quaternion, Rotation, Vector2, Vector3};
+use half::f16;
 use image::{ImageBuffer, Rgba};
+use serde::Serialize;
 
 use crate::{
-    camera::{Camera, OrthographicProjection, Projection},
+    camera::{ Camera, OrthographicProjection, Projection},
     cmap::ColorMap,
-    renderer::{RenderSettings, VolumeRenderer},
+    renderer::{FrameBuffer, ImageUpscaler, RenderSettings, VolumeRenderer},
     volume::{Volume, VolumeGPU},
     WGPUContext,
 };
@@ -13,12 +15,13 @@ async fn render_view(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     renderer: &mut VolumeRenderer,
+    upscaler: &ImageUpscaler,
     volume: &VolumeGPU,
     camera: Camera,
     render_settings: &RenderSettings,
     bg: wgpu::Color,
     resolution: Vector2<u32>,
-) -> anyhow::Result<ImageBuffer<Rgba<u8>, Vec<u8>>> {
+) -> anyhow::Result<(ImageBuffer<Rgba<u8>, Vec<u8>>, RenderStatistics)> {
     let target = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("render texture"),
         size: wgpu::Extent3d {
@@ -36,11 +39,73 @@ async fn render_view(
 
     let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
 
+    let render_resolution = [
+        (resolution.x as f32 / render_settings.render_scale) as u32,
+        (resolution.y as f32 / render_settings.render_scale) as u32,
+    ];
+    let frame_buffer = FrameBuffer::new(device, render_resolution[0],render_resolution[1], renderer.format());
+
+    let frame_data = renderer.prepare(device, &volume, &camera, &render_settings, render_resolution ,0);
+
+    let queryset = device.create_query_set(
+        &wgpu::QuerySetDescriptor {
+            label: Some("query set"),
+            ty: wgpu::QueryType::Timestamp,
+            count: 4,
+        },
+    );
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("render encoder"),
     });
-    let channel = 0;
-    let frame_data = renderer.prepare(device, volume, &camera, &render_settings, channel);
+    encoder.write_timestamp(&queryset, 0);
+    {
+        let mut render_pass = encoder
+            .begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("render pass"),
+                color_attachments: &[
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &frame_buffer.color().create_view(&Default::default()),
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &frame_buffer.grad_x().create_view(&Default::default()),
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &frame_buffer.grad_y().create_view(&Default::default()),
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &frame_buffer.grad_xy().create_view(&Default::default()),
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                ],
+                ..Default::default()
+            })
+            .forget_lifetime();
+
+        renderer.render(queue, &mut render_pass, &frame_data);
+    }
+    encoder.write_timestamp(&queryset, 1);
+
+    encoder.write_timestamp(&queryset, 2);
+
     {
         let mut render_pass = encoder
             .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -53,16 +118,41 @@ async fn render_view(
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
+                ..Default::default()
             })
             .forget_lifetime();
-        renderer.render(&queue, &mut render_pass, &frame_data);
+        upscaler.render(&mut render_pass, &frame_data.settings_bg, &frame_buffer);
     }
-    queue.submit(std::iter::once(encoder.finish()));
+    encoder.write_timestamp(&queryset, 3);
+
+    let timestamp_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("timestamp buffer"),
+        size: 4 * std::mem::size_of::<u64>() as u64,
+        usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    encoder.resolve_query_set(&queryset, 0..4, &timestamp_buffer, 0);
+
+    let done = queue.submit(std::iter::once(encoder.finish()));
+    let buff = download_buffer(device, &timestamp_buffer, Some(done)).await;
+    let timestamps: Vec<u64> = buff.chunks_exact(8).map(|v| {
+        u64::from_le_bytes([v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]])
+    }).collect();
+
+    let render_time =(timestamps[1] - timestamps[0]) as f32 * queue.get_timestamp_period()*1e-6;
+    let upscaling_time = (timestamps[3] - timestamps[2]) as f32 * queue.get_timestamp_period()*1e-6;
+
     let img = download_texture(&target, device, queue).await;
-    return Ok(img);
+    return Ok((img, RenderStatistics {
+        render_time,
+        upscaling_time,
+    }));
+}
+
+#[derive(Debug, Clone,Serialize)]
+pub struct RenderStatistics {
+    pub render_time: f32,
+    pub upscaling_time: f32,
 }
 
 pub async fn render_volume(
@@ -77,10 +167,10 @@ pub async fn render_volume(
     spatial_interpolation: wgpu::FilterMode,
     temporal_interpolation: wgpu::FilterMode,
     axis_scale: Option<Vector3<f32>>,
+    direction: Option<Vector3<f32>>,
 ) -> anyhow::Result<Vec<ImageBuffer<Rgba<u8>, Vec<u8>>>> {
-    env_logger::init();
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::GL,
+        backends: wgpu::Backends::PRIMARY,
         ..Default::default()
     });
     let wgpu_context = WGPUContext::new(&instance, None).await;
@@ -93,27 +183,33 @@ pub async fn render_volume(
         .map(|v| VolumeGPU::new(device, queue, v))
         .collect();
 
-    let render_format = wgpu::TextureFormat::Rgba8UnormSrgb;
+    let render_format = wgpu::TextureFormat::Rgba16Float;
 
     let mut renderer = VolumeRenderer::new(&device, &queue, render_format);
 
+    let upscaler = ImageUpscaler::new(device, render_format);
+
     let ratio = resolution.x as f32 / resolution.y as f32;
     let radius = aabb.radius();
-    let camera = Camera::new_aabb_iso(
-        aabb,
+    let center = aabb.center();
+    let offset = direction.unwrap_or(Vector3::new(1., 1., -2.));
+    let camera = Camera::new(
+        center + offset,
+        Quaternion::look_at(-offset, Vector3::unit_y()),
         Projection::Orthographic(OrthographicProjection::new(
-            Vector2::new(ratio, 1.) * radius * 2.,
-            0.01,
-            1000.,
+            Vector2::new(ratio, 1.) * 2. * radius,
+            1e-4,
+            100.,
         )),
     );
 
     let mut images: Vec<ImageBuffer<Rgba<u8>, Vec<u8>>> = Vec::with_capacity(frames.len());
     for time in frames {
-        let img = render_view(
+        let (img,_) = render_view(
             device,
             queue,
             &mut renderer,
+            &upscaler,
             &volume_gpu[0],
             camera,
             &RenderSettings {
@@ -134,6 +230,80 @@ pub async fn render_volume(
         images.push(img);
     }
     Ok(images)
+}
+
+
+pub async fn render_volume_directions(
+    volumes: Vec<Volume>,
+    resolution: Vector2<u32>,
+    bg: wgpu::Color,
+    directions: Vec<Vector3<f32>>,
+    render_settings: &RenderSettings
+) -> anyhow::Result<(Vec<ImageBuffer<Rgba<u8>, Vec<u8>>>,RenderStatistics)> {
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::PRIMARY,
+        ..Default::default()
+    });
+    let wgpu_context = WGPUContext::new(&instance, None).await;
+    let device = &wgpu_context.device;
+    let queue = &wgpu_context.queue;
+
+    let aabb = volumes[0].aabb.clone();
+    let volume_gpu: Vec<VolumeGPU> = volumes
+        .into_iter()
+        .map(|v| VolumeGPU::new(device, queue, v))
+        .collect();
+
+    let render_format = wgpu::TextureFormat::Rgba16Float;
+
+    let mut renderer = VolumeRenderer::new(&device, &queue, render_format);
+
+    let upscaler = ImageUpscaler::new(device, render_format);
+
+    let ratio = resolution.x as f32 / resolution.y as f32;
+    let radius = aabb.radius();
+    let center = aabb.center();
+
+    let mut stats_avg = RenderStatistics {
+        render_time: 0.,
+        upscaling_time: 0.,
+    };
+
+    let mut images: Vec<ImageBuffer<Rgba<u8>, Vec<u8>>> = Vec::with_capacity(directions.len());
+    for direction in &directions {
+        let mut up = Vector3::unit_y();
+        if direction.dot(up).abs() > 0.95 {
+            up = Vector3::unit_z();
+        }
+
+        let camera = Camera::new(
+            center + direction,
+            Quaternion::look_at(-*direction, up),
+            Projection::Orthographic(OrthographicProjection::new(
+                Vector2::new(ratio, 1.) * 2. * radius,
+                1e-4,
+                100.,
+            )),
+        );
+        let (img,stats) = render_view(
+            device,
+            queue,
+            &mut renderer,
+            &upscaler,
+            &volume_gpu[0],
+            camera,
+            &render_settings,
+            bg,
+            resolution,
+        )
+        .await?;
+
+        
+        stats_avg.render_time += stats.render_time / (&directions).len() as f32;
+        stats_avg.upscaling_time += stats.upscaling_time / (&directions).len() as f32;
+        images.push(img);
+    }
+    Ok((images, stats_avg))
 }
 
 pub async fn download_texture(
@@ -181,10 +351,15 @@ pub async fn download_texture(
         let data: wgpu::BufferView<'_> =
             download_buffer(device, &staging_buffer, Some(sub_idx)).await;
 
-        ImageBuffer::<Rgba<u8>, _>::from_raw(
+        let data_u8 = data
+            .chunks_exact(2)
+            .map(|v| (f16::from_le_bytes([v[0], v[1]]).to_f32() * 255.).clamp(0., 255.) as u8)
+            .collect::<Vec<_>>();
+
+        ImageBuffer::<Rgba<_>, _>::from_raw(
             bytes_per_row / texel_size,
             fb_size.height,
-            data.to_vec(),
+            data_u8.to_vec(),
         )
         .unwrap()
     };

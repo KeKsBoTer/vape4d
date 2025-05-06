@@ -1,8 +1,9 @@
+use animation::{Animation, TurntableAnimation};
 use camera::{Camera, OrthographicProjection};
 use cmap::ColorMap;
 use controller::CameraController;
 use egui::FullOutput;
-use renderer::{FrameBuffer, ImageUpscaler, RenderSettings, VolumeRenderer};
+use renderer::{FrameBuffer, ImageUpscaler, RenderSettings, UpscalingMethod, VolumeRenderer};
 use std::{path::PathBuf, sync::Arc};
 use volume::VolumeGPU;
 #[cfg(target_arch = "wasm32")]
@@ -34,6 +35,7 @@ pub mod camera;
 pub mod cmap;
 mod controller;
 pub mod offline;
+mod animation;
 #[cfg(feature = "python")]
 pub mod py;
 pub mod renderer;
@@ -88,7 +90,7 @@ impl WGPUContext {
             .await
             .unwrap();
 
-        let required_features = wgpu::Features::default();
+        let required_features = wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS | wgpu::Features::MAPPABLE_PRIMARY_BUFFERS;
 
         log::debug!("adapter: {:?}", adapter.get_info());
         let (device, queue) = adapter
@@ -141,6 +143,9 @@ pub struct WindowContext {
     colormap_editor_visible: bool,
 
     cmap_select_visible: bool,
+
+    camera_animation: Option<Box<TurntableAnimation>>,
+    state_time: Instant
 }
 
 impl WindowContext {
@@ -235,7 +240,7 @@ impl WindowContext {
             camera::Projection::Orthographic(OrthographicProjection::new(
                 Vector2::new(ratio, 1.) * 2. * radius,
                 1e-4,
-                10.,
+                100.,
             )),
         );
 
@@ -278,12 +283,14 @@ impl WindowContext {
             colormap_editor_visible: render_config.show_colormap_editor,
 
             cmap_select_visible: render_config.show_cmap_select,
+            camera_animation: None,
+            state_time: Instant::now(),
         })
     }
 
     fn load_file(&mut self, path: &PathBuf) -> anyhow::Result<()> {
         let reader = std::fs::File::open(path)?;
-        let volume = Volume::load_numpy(reader, true)?;
+        let volume = Volume::load(reader)?;
         let volume_gpu =
             VolumeGPU::new(&self.wgpu_context.device, &self.wgpu_context.queue, volume);
         self.volume = volume_gpu;
@@ -321,6 +328,15 @@ impl WindowContext {
         let old_camera = self.camera.clone();
         self.controller.update_camera(&mut self.camera, dt);
         if self.camera != old_camera {
+            requires_redraw = true;
+        }
+
+        self.state_time += dt;
+
+        if let Some(animation) = &mut self.camera_animation {
+            let (pos, rot) = animation.sample(self.state_time);
+            self.camera.position = pos;
+            self.camera.rotation = rot;
             requires_redraw = true;
         }
 
@@ -393,6 +409,7 @@ impl WindowContext {
                 &self.volume,
                 &camera,
                 &self.render_settings,
+                [output.texture.size().width, output.texture.size().height],
                 selected_channel,
             ));
         } else {
@@ -406,6 +423,7 @@ impl WindowContext {
                     &self.volume,
                     &camera,
                     &self.render_settings,
+                    [output.texture.size().width, output.texture.size().height],
                     channel,
                 ));
             }
@@ -628,11 +646,36 @@ impl ApplicationHandler<WindowContext> for App {
                     }
                     WindowEvent::KeyboardInput { event, .. } => {
                         if let PhysicalKey::Code(key) = event.physical_key {
-                            state
-                                .controller
-                                .process_keyboard(key, event.state == ElementState::Pressed);
-                            if key == KeyCode::KeyU && event.state == ElementState::Released {
-                                state.ui_visible = !state.ui_visible;
+                            if let Some(num) = key2num(key) {
+                                if event.state == ElementState::Released  {
+                                    state.render_settings.upscaling_method = match  num {
+                                        0 => UpscalingMethod::Nearest,
+                                        1 => UpscalingMethod::Bilinear,
+                                        2 => UpscalingMethod::Bicubic,
+                                        3 => UpscalingMethod::Spline,
+                                        4 => UpscalingMethod::Lanczos,
+                                        _ => UpscalingMethod::Nearest,
+                                        
+                                    }
+                                }
+                            } else {
+                                let input = state
+                                    .controller
+                                    .process_keyboard(key, event.state == ElementState::Pressed);
+                                if input {
+                                    state.camera_animation = None;
+                                }
+                                if key == KeyCode::KeyU && event.state == ElementState::Released {
+                                    state.ui_visible = !state.ui_visible;
+                                }
+                                if key == KeyCode::KeyT && event.state == ElementState::Released {
+                                    state.camera_animation = Some(Box::new(animation::TurntableAnimation::new(
+                                        Point3::new(0., 1., -2.),
+                                        Duration::from_secs_f32(10.),
+                                        state.controller.center,
+                                        Vector3::new(0., 1., 0.),
+                                    )));
+                                }
                             }
                         }
                     }
@@ -778,4 +821,30 @@ pub async fn open_window(
         canvas_id,
     );
     event_loop.run_app(&mut app).unwrap();
+}
+
+fn key2num(key: KeyCode) -> Option<u32> {
+    match key {
+        KeyCode::Digit0 => Some(0),
+        KeyCode::Digit1 => Some(1),
+        KeyCode::Digit2 => Some(2),
+        KeyCode::Digit3 => Some(3),
+        KeyCode::Digit4 => Some(4),
+        KeyCode::Digit5 => Some(5),
+        KeyCode::Digit6 => Some(6),
+        KeyCode::Digit7 => Some(7),
+        KeyCode::Digit8 => Some(8),
+        KeyCode::Digit9 => Some(9),
+        KeyCode::Numpad0 => Some(0),
+        KeyCode::Numpad1 => Some(1),
+        KeyCode::Numpad2 => Some(2),
+        KeyCode::Numpad3 => Some(3),
+        KeyCode::Numpad4 => Some(4),
+        KeyCode::Numpad5 => Some(5),
+        KeyCode::Numpad6 => Some(6),
+        KeyCode::Numpad7 => Some(7),
+        KeyCode::Numpad8 => Some(8),
+        KeyCode::Numpad9 => Some(9),
+        _ => None,
+    }
 }

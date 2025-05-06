@@ -9,13 +9,10 @@ description = "4D Volume Viewer"
 
 [dependencies]
 wgpu = { version = "24.0", features = ["webgl"], default-features = true}
-winit = "0.30.9"
-# cgmath = { version = "0.18.0", features = [
-#     "bytemuck",
-# ], git = 'https://github.com/rustgd/cgmath' }
+winit = "0.30.10"
 cgmath = { version = "0.18.0", features = [
     "bytemuck","egui-probe"
-], path = '/home/niedermayr/Projects/cgmath' }
+], git = 'https://github.com/KeKsBoTer/cgmath' }
 
 env_logger = "0.11.7"
 clap = { version = "4.5.34", features = ["derive"] }#
@@ -44,10 +41,13 @@ include_dir = { version = "0.7.3" }
 # python bindings
 pyo3 = { version = "0.24.0", features = ["extension-module"], optional = true }
 numpy = { version = "0.24.0", optional = true, features = ["half"] }
-ndarray = { version = "0.16.1", features = ["rayon"]}
+ndarray = { version = "0.15.1", features = ["rayon"]}
 rfd = { version = "0.15.2", features = ["file-handle-inner"] }
 rayon = {version = "1.5.1"}
 egui-probe = {version="0.8.0", features = ["derive"]}
+
+
+nifti = { version = "0.16.0" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster = { version = "0.4.0", features = ["macro"] }

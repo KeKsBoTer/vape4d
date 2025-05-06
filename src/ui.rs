@@ -1,11 +1,10 @@
 use std::{f32::consts::PI, ops::RangeInclusive, time::Duration};
 
 use egui::{emath::Numeric, epaint::TextShape, vec2};
-use egui_plot::{Plot, PlotImage, PlotPoint};
+use egui_plot::{Plot, PlotImage, PlotPoint, PlotPoints, Polygon};
 
 use crate::{
-    cmap::{ColorMap, COLORMAP_RESOLUTION},
-    WindowContext,
+    cmap::{ColorMap, COLORMAP_RESOLUTION}, WindowContext
 };
 
 use crate::cmap::COLORMAPS;
@@ -474,6 +473,35 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
             });
             });
     }
+
+    egui::Window::new("Camera Animation").show(ctx, |ui|{
+        egui_plot::Plot::new("camera_animation")
+            .width(300.)
+            .height(300.)
+
+            .show(ui, |ui| {
+                if let Some(animation) = &state.camera_animation{
+                    let mut points = Vec::new();
+                    for i in 0..100{
+                        let t = i as f32 / 100.0;
+                        let x = animation.center.x + animation.radius * (t * 2.0 * PI).cos();
+                        let y = animation.center.z + animation.radius * (t * 2.0 * PI).sin();
+                        points.push(PlotPoint::new(x, y));
+                    }
+                    ui.polygon(
+                       Polygon::new(PlotPoints::Owned(points))
+                    );
+                    
+                }
+                ui.points(egui_plot::Points::new(egui_plot::PlotPoints::Owned(vec![
+                    egui_plot::PlotPoint::new(state.camera.position.x, state.camera.position.z),
+                ])));
+
+                ui.points(egui_plot::Points::new(egui_plot::PlotPoints::Owned(vec![
+                    egui_plot::PlotPoint::new(state.controller.center.x, state.controller.center.z),
+                ])));
+            });
+    });
 
     egui::Window::new("Debug").default_open(false).scroll(true).show(ctx, |ui| {
         ui.collapsing("Render Settings",|ui|{

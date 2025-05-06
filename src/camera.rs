@@ -34,6 +34,10 @@ impl Camera {
     pub fn view_matrix(&self) -> Matrix4<f32> {
         world2view(self.rotation, self.position)
     }
+    
+    pub fn up(&self) -> Vector3<f32> {
+       self.view_matrix().row(1).truncate()
+    }
 }
 
 
