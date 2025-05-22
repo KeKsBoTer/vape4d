@@ -9,6 +9,7 @@ use crate::{
     WGPUContext,
 };
 
+
 async fn render_view<P: Projection>(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -16,7 +17,6 @@ async fn render_view<P: Projection>(
     volume: &VolumeGPU,
     camera: Camera<P>,
     render_settings: &RenderSettings,
-    bg: wgpu::Color,
     resolution: Vector2<u32>,
 ) -> anyhow::Result<ImageBuffer<Rgba<u8>, Vec<u8>>> {
     let target = device.create_texture(&wgpu::TextureDescriptor {
@@ -42,23 +42,21 @@ async fn render_view<P: Projection>(
     let channel = 0;
     let frame_data = renderer.prepare(device, volume, &camera, &render_settings, channel);
     {
-        let mut render_pass = encoder
-            .begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &target_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(bg),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            })
-            .forget_lifetime();
-        renderer.render(&queue,&mut render_pass, &frame_data);
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &target_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(render_settings.background_color),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        }).forget_lifetime();
+        renderer.render(queue,&mut render_pass, &frame_data);
     }
     queue.submit(std::iter::once(encoder.finish()));
     let img = download_texture(&target, device, queue).await;
@@ -70,7 +68,6 @@ pub async fn render_volume(
     cmap: ColorMap,
     resolution: Vector2<u32>,
     frames: &[f32],
-    bg: wgpu::Color,
     vmin: Option<f32>,
     vmax: Option<f32>,
     distance_scale: f32,
@@ -123,7 +120,6 @@ pub async fn render_volume(
                 cmap:cmap.clone(),
                 ..Default::default()
             },
-            bg,
             resolution,
         )
         .await?;

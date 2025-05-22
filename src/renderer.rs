@@ -1,10 +1,10 @@
 use crate::{
     camera::{Camera, Projection, VIEWPORT_Y_FLIP},
     cmap::{ColorMap, ColorMapGPU, COLORMAPS, COLORMAP_RESOLUTION},
-    volume::{Aabb, Volume, VolumeGPU},
+    volume::{Volume, VolumeGPU},
 };
 
-use cgmath::{ElementWise, EuclideanSpace, Matrix4, SquareMatrix, Vector3, Vector4, Zero};
+use cgmath::{ElementWise, EuclideanSpace, InnerSpace, Matrix4, SquareMatrix, Vector3, Vector4};
 use wgpu::util::DeviceExt;
 
 pub struct VolumeRenderer {
@@ -286,9 +286,8 @@ impl<P: Projection> From<&Camera<P>> for CameraUniform {
 
 #[derive(Debug, Clone)]
 pub struct RenderSettings {
-    pub clipping_aabb: Option<Aabb<f32>>,
     pub time: f32,
-    pub step_size: f32,
+    pub step_size: Option<f32>,
     pub spatial_filter: wgpu::FilterMode,
     pub temporal_filter: wgpu::FilterMode,
     pub distance_scale: f32,
@@ -296,15 +295,15 @@ pub struct RenderSettings {
     pub vmax: Option<f32>,
     pub gamma_correction: bool,
     pub axis_scale: Vector3<f32>,
-    pub cmap:ColorMap
+    pub cmap: ColorMap,
+    pub background_color: wgpu::Color,
 }
 
 impl Default for RenderSettings {
     fn default() -> Self {
         Self {
-            clipping_aabb: None,
             time: 0.,
-            step_size: 1e-4,
+            step_size: None,
             spatial_filter: wgpu::FilterMode::Linear,
             temporal_filter: wgpu::FilterMode::Linear,
             distance_scale: 1.,
@@ -313,6 +312,7 @@ impl Default for RenderSettings {
             gamma_correction: false,
             axis_scale: Vector3::new(1.0, 1.0, 1.0),
             cmap: default_cmap(),
+            background_color:wgpu::Color::TRANSPARENT
         }
     }
 }
@@ -332,12 +332,9 @@ fn default_cmap() -> ColorMap {
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct RenderSettingsUniform {
+struct RenderSettingsUniform {
     volume_aabb_min: Vector4<f32>,
     volume_aabb_max: Vector4<f32>,
-    clipping_min: Vector4<f32>,
-    clipping_max: Vector4<f32>,
-
     time: f32,
     step_size: f32,
     temporal_filter: u32,
@@ -350,25 +347,18 @@ pub struct RenderSettingsUniform {
 }
 
 impl RenderSettingsUniform {
-    pub fn from_settings(settings: &RenderSettings, volume: &Volume) -> Self {
+    fn from_settings(settings: &RenderSettings, volume: &Volume) -> Self {
         let volume_aabb = volume.aabb;
         let aabb_size = settings.axis_scale.mul_element_wise(volume_aabb.size());
         let aabb_min = volume_aabb.center() - aabb_size / 2.;
         let aabb_max = volume_aabb.center() + aabb_size / 2.;
+        let volume_step_size = step_size_for_volume(volume);
 
         Self {
             volume_aabb_min: aabb_min.to_vec().extend(0.),
             volume_aabb_max: aabb_max.to_vec().extend(0.),
             time: settings.time,
-            clipping_min: settings
-                .clipping_aabb
-                .map(|bb| bb.min.to_vec().extend(0.))
-                .unwrap_or(RenderSettingsUniform::default().clipping_min),
-            clipping_max: settings
-                .clipping_aabb
-                .map(|bb| bb.max.to_vec().extend(0.))
-                .unwrap_or(RenderSettingsUniform::default().clipping_max),
-            step_size: settings.step_size,
+            step_size: settings.step_size.unwrap_or(volume_step_size),
             temporal_filter: settings.temporal_filter as u32,
             spatial_filter: settings.spatial_filter as u32,
             distance_scale: settings.distance_scale,
@@ -384,8 +374,6 @@ impl Default for RenderSettingsUniform {
         Self {
             volume_aabb_min: Vector4::new(-1., -1., -1., 0.),
             volume_aabb_max: Vector4::new(1., 1., 1., 0.),
-            clipping_min: Vector4::zero(),
-            clipping_max: Vector4::new(1., 1., 1., 0.),
             time: 0.,
             step_size: 0.01,
             temporal_filter: wgpu::FilterMode::Linear as u32,
@@ -396,4 +384,10 @@ impl Default for RenderSettingsUniform {
             gamma_correction: 0,
         }
     }
+}
+
+
+pub fn step_size_for_volume(volume: &Volume) -> f32 {
+    let volume_voxel_size: Vector3<f32> = volume.aabb.size().mul_element_wise(volume.size().map(|v|1./v as f32));
+    return volume_voxel_size.magnitude()/10.;
 }

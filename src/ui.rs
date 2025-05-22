@@ -4,8 +4,7 @@ use egui::{emath::Numeric, epaint::TextShape, vec2};
 use egui_plot::{Plot, PlotImage, PlotPoint};
 
 use crate::{
-    cmap::{ColorMap, COLORMAP_RESOLUTION},
-    WindowContext,
+    cmap::{ColorMap, COLORMAP_RESOLUTION}, renderer::step_size_for_volume, WindowContext
 };
 
 use crate::cmap::COLORMAPS;
@@ -51,12 +50,16 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
 
                 ui.add_enabled(uses_step_size, egui::Label::new("Step Size"))
                     .on_hover_text("Step size for the raymarching algorithm");
-                ui.add_enabled(
-                    uses_step_size,
-                    egui::DragValue::new(&mut state.render_settings.step_size)
-                        .speed(0.01)
-                        .range((1e-3)..=(0.1)),
-                );
+                if let Some(step_size) = &mut state.render_settings.step_size {
+                    ui.add(
+                        egui::DragValue::new(step_size)
+                            .speed(0.01)
+                            .range((1e-4)..=1000.)
+                            .clamp_existing_to_range(true),
+                    );
+                } else {
+                    ui.label(format!("{:e}",step_size_for_volume(&state.volume.volume)));
+                }
                 ui.end_row();
 
                 ui.label("Axis Scale")
@@ -97,13 +100,13 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                 ui.end_row();
                 ui.label("Background Color");
                 let mut bg = [
-                    state.background_color.r as f32,
-                    state.background_color.g as f32,
-                    state.background_color.b as f32,
-                    state.background_color.a as f32,
+                    state.render_settings.background_color.r as f32,
+                    state.render_settings.background_color.g as f32,
+                    state.render_settings.background_color.b as f32,
+                    state.render_settings.background_color.a as f32,
                 ];
                 ui.color_edit_button_rgba_premultiplied(&mut bg);
-                state.background_color = wgpu::Color {
+                state.render_settings.background_color = wgpu::Color {
                     r: bg[0] as f64,
                     g: bg[1] as f64,
                     b: bg[2] as f64,
@@ -215,7 +218,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
         });
     // let mut cmap = state.cmap.clone();
 
-    if state.colormap_editor_visible {
+    if state.ui_settings.show_colormap_editor {
         egui::Window::new("Transfer Function")
             .default_size(vec2(300., 50.))
             .show(ctx, |ui| {
@@ -259,7 +262,7 @@ pub(crate) fn ui(state: &mut WindowContext) -> bool {
                     });
                 
                 ui.end_row();
-                if state.cmap_select_visible {
+                if state.ui_settings.show_cmap_select {
                     ui.label("Colormap");
                     ui.horizontal(|ui| {
                         let cmaps = &COLORMAPS;
@@ -625,7 +628,7 @@ fn optional_drag<T: Numeric>(
     } else {
         egui_winit::egui::DragValue::new(&mut placeholder).custom_formatter(|_, _| {
             if let Some(v) = default {
-                format!("{:.2}", v.to_f64())
+                format!("{:.4}", v.to_f64())
             } else {
                 "—".into()
             }
@@ -655,9 +658,11 @@ fn show_cmap(ui: &mut egui::Ui, id: egui::Id, cmap: &ColorMap, vmin: f32, vmax: 
     let width = vmax - vmin;
     let height = width / 5.;
     let image = PlotImage::new(
+        "cmap_preview",
         texture,
         PlotPoint::new(vmin + width * 0.5, height / 2.),
         vec2(width, height),
+
     );
     let plot = Plot::new(id)
         .show_x(true)

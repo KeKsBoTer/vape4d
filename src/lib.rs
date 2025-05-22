@@ -1,5 +1,4 @@
 use camera::{Camera, OrthographicProjection};
-use cmap::ColorMap;
 use controller::CameraController;
 use egui::FullOutput;
 use renderer::{RenderSettings, VolumeRenderer};
@@ -18,7 +17,7 @@ mod web;
 #[cfg(target_arch = "wasm32")]
 pub use web::*;
 
-use cgmath::{Vector2, Vector3};
+use cgmath::Vector2;
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
@@ -41,37 +40,29 @@ mod ui;
 mod ui_renderer;
 #[cfg(not(target_arch = "wasm32"))]
 mod viewer;
+mod volume;
 #[cfg(not(target_arch = "wasm32"))]
 pub use viewer::viewer;
 
-pub mod volume;
-
-#[derive(Debug, Clone)]
-pub struct RenderConfig {
+#[derive(Debug,Clone)]
+pub struct ViewerSettings {
     pub no_vsync: bool,
-    pub background_color: wgpu::Color,
-    pub show_colormap_editor: bool,
-    pub vmin: Option<f32>,
-    pub vmax: Option<f32>,
-    pub distance_scale: f32,
-    pub axis_scale: Vector3<f32>,
-
-    pub show_cmap_select: bool,
+    pub render_settings: RenderSettings,
+    pub ui_settings: UISettings,
     pub duration: Option<Duration>,
 }
 
-impl Default for RenderConfig {
+#[derive(Debug, Clone, Copy)]
+pub struct UISettings {
+    pub show_colormap_editor: bool,
+    pub show_cmap_select: bool,
+}
+
+impl Default for UISettings {
     fn default() -> Self {
         Self {
-            no_vsync: false,
-            background_color: wgpu::Color::BLACK,
             show_colormap_editor: true,
-            vmin: None,
-            vmax: None,
-            distance_scale: 1.0,
-            axis_scale: Vector3::new(1.0, 1.0, 1.0),
             show_cmap_select: true,
-            duration: None,
         }
     }
 }
@@ -124,8 +115,6 @@ pub struct WindowContext {
     ui_renderer: ui_renderer::EguiWGPU,
     ui_visible: bool,
 
-    background_color: wgpu::Color,
-
     volume: VolumeGPU,
     renderer: VolumeRenderer,
 
@@ -136,9 +125,7 @@ pub struct WindowContext {
     num_columns: u32,
     selected_channel: Option<usize>,
 
-    colormap_editor_visible: bool,
-
-    cmap_select_visible: bool,
+    ui_settings: UISettings,
 }
 
 impl WindowContext {
@@ -146,8 +133,7 @@ impl WindowContext {
     async fn new(
         window: Window,
         volume: Volume,
-        cmap: ColorMap,
-        render_config: RenderConfig,
+        viewer_settings: ViewerSettings,
     ) -> anyhow::Result<Self> {
         let mut size = window.inner_size();
         if size.width == 0 || size.height == 0 {
@@ -189,7 +175,7 @@ impl WindowContext {
             width: size.width,
             height: size.height,
             desired_maximum_frame_latency: 2,
-            present_mode: if render_config.no_vsync {
+            present_mode: if viewer_settings.no_vsync {
                 wgpu::PresentMode::AutoNoVsync
             } else {
                 wgpu::PresentMode::AutoVsync
@@ -201,21 +187,9 @@ impl WindowContext {
 
         let ui_renderer = ui_renderer::EguiWGPU::new(device, surface_format, &window);
 
-        let renderer = VolumeRenderer::new(device,queue, surface_format);
+        let renderer = VolumeRenderer::new(device, queue, surface_format);
 
-        let render_settings = RenderSettings {
-            clipping_aabb: None,
-            time: 0.,
-            step_size: 2. / 1000.,
-            spatial_filter: wgpu::FilterMode::Linear,
-            temporal_filter: wgpu::FilterMode::Linear,
-            distance_scale: render_config.distance_scale,
-            vmin: render_config.vmin,
-            vmax: render_config.vmax,
-            gamma_correction: !surface_format.is_srgb(),
-            axis_scale: render_config.axis_scale,
-            cmap
-        };
+        let render_settings = viewer_settings.render_settings.clone();
 
         let mut controller = CameraController::new(0.1, 0.05);
         controller.center = volume.aabb.center();
@@ -227,7 +201,7 @@ impl WindowContext {
             OrthographicProjection::new(Vector2::new(ratio, 1.) * 2. * radius, 1e-4, 100.),
         );
 
-        let animation_duration = render_config
+        let animation_duration = viewer_settings
             .duration
             .unwrap_or(Duration::from_secs_f32(5.));
 
@@ -243,7 +217,6 @@ impl WindowContext {
             controller,
             ui_renderer,
             ui_visible: true,
-            background_color: render_config.background_color,
             camera,
 
             volume: volumes_gpu,
@@ -253,9 +226,7 @@ impl WindowContext {
             playing: true,
             num_columns,
             selected_channel: None,
-            colormap_editor_visible: render_config.show_colormap_editor,
-
-            cmap_select_visible: render_config.show_cmap_select,
+            ui_settings: viewer_settings.ui_settings.clone(),
         })
     }
 
@@ -390,7 +361,7 @@ impl WindowContext {
                         view: &view_rgb,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(self.background_color),
+                            load: wgpu::LoadOp::Clear(self.render_settings.background_color),
                             store: wgpu::StoreOp::Store,
                         },
                     })],
@@ -410,7 +381,8 @@ impl WindowContext {
                         1.,
                     );
                 }
-                self.renderer.render(&self.wgpu_context.queue,&mut render_pass, &v);
+                self.renderer
+                    .render(&self.wgpu_context.queue, &mut render_pass, &v);
             }
 
             if let Some(state) = &ui_state {
@@ -434,8 +406,7 @@ impl WindowContext {
 pub struct App {
     state: Option<WindowContext>,
     volume: Volume,
-    config: RenderConfig,
-    cmap: ColorMap,
+    config: ViewerSettings,
 
     last_touch_position: PhysicalPosition<f64>,
     last_draw: Instant,
@@ -449,8 +420,7 @@ impl App {
     fn new(
         event_loop_proxy: EventLoopProxy<WindowContext>,
         volume: Volume,
-        cmap: ColorMap,
-        config: RenderConfig,
+        config: ViewerSettings,
         #[cfg(target_arch = "wasm32")] canvas_id: String,
     ) -> Self {
         Self {
@@ -460,7 +430,6 @@ impl App {
             last_touch_position: PhysicalPosition::new(0., 0.),
             last_draw: Instant::now(),
             event_loop_proxy: Some(event_loop_proxy),
-            cmap,
             #[cfg(target_arch = "wasm32")]
             canvas_id,
         }
@@ -505,8 +474,7 @@ impl ApplicationHandler<WindowContext> for App {
                 let window_context = WindowContext::new(
                     window,
                     self.volume.clone(),
-                    self.cmap.clone(),
-                    self.config.clone(),
+                    &self.config,
                 );
                 wasm_bindgen_futures::spawn_local(async move {
                     let gfx = window_context.await.unwrap();
@@ -519,7 +487,6 @@ impl ApplicationHandler<WindowContext> for App {
                 let window_context = WindowContext::new(
                     window,
                     self.volume.clone(),
-                    self.cmap.clone(),
                     self.config.clone(),
                 );
                 let context = pollster::block_on(window_context).unwrap();
@@ -687,15 +654,13 @@ impl ApplicationHandler<WindowContext> for App {
 
 pub async fn open_window(
     volumes: Volume,
-    cmap: ColorMap,
-    config: RenderConfig,
+    config: ViewerSettings,
     #[cfg(target_arch = "wasm32")] canvas_id: String,
 ) {
     let event_loop: EventLoop<WindowContext> = EventLoop::with_user_event().build().unwrap();
     let mut app = App::new(
         event_loop.create_proxy(),
         volumes,
-        cmap,
         config,
         #[cfg(target_arch = "wasm32")]
         canvas_id,

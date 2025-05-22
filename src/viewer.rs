@@ -2,9 +2,9 @@ use clap::Parser;
 #[cfg(not(target_arch = "wasm32"))]
 use std::{ffi::OsString, fs::File, io::BufReader};
 use std::{fmt::Debug, path::PathBuf};
+use cgmath::Vector3;
 
-#[cfg(not(target_arch = "wasm32"))]
-use crate::{cmap, open_window, volume::Volume, RenderConfig};
+use crate::{cmap, open_window, volume::Volume, ViewerSettings};
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
@@ -43,10 +43,26 @@ where
 
     open_window(
         volume,
-        cmap,
-        RenderConfig {
+        ViewerSettings {
             no_vsync: opt.no_vsync,
-            ..Default::default()
+            render_settings: crate::RenderSettings {
+                time: 0.,
+                step_size: None,
+                spatial_filter: wgpu::FilterMode::Linear,
+                temporal_filter: wgpu::FilterMode::Linear,
+                distance_scale: 1.0,
+                vmin: None,
+                vmax: None,
+                gamma_correction: false,
+                background_color: wgpu::Color::BLACK.into(),
+                cmap,
+                axis_scale: Vector3::new(1.0, 1.0, 1.0),
+            },
+            ui_settings: crate::UISettings {
+                show_colormap_editor: true,
+                show_cmap_select: true,
+            },
+            duration: None,
         },
     )
     .await;

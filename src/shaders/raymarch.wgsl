@@ -13,8 +13,6 @@ struct CameraUniforms {
 
 struct Settings {
     volume_aabb: Aabb,
-    clipping: Aabb,
-
     time: f32,
     step_size: f32,
     temporal_filter: u32,
@@ -241,11 +239,9 @@ fn trace_ray(ray_in: Ray,pixel_pos:vec2<f32>) -> vec4<f32> {
     let aabb = settings.volume_aabb;
     let aabb_size = aabb.max - aabb.min;
     var ray = ray_in;
-    let slice_min = settings.clipping.min;
-    let slice_max = settings.clipping.max;
     // find closest point on volume
-    let aabb_min = (aabb.min + (slice_min * aabb_size)); //  zxy for tensorf alignment
-    let aabb_max = (aabb.max - ((1. - slice_max) * aabb_size)); //  zxy for tensorf alignment
+    let aabb_min = (aabb.min + aabb_size); //  zxy for tensorf alignment
+    let aabb_max = (aabb.max - aabb_size); //  zxy for tensorf alignment
     let intersec = intersectAABB(ray, aabb_min, aabb_max);
 
     if intersec.x > intersec.y {
@@ -307,7 +303,7 @@ fn trace_ray(ray_in: Ray,pixel_pos:vec2<f32>) -> vec4<f32> {
             sample_pos = next_pos(&pos, step_size_g, ray.dir);
         }
 
-        let slice_test = any(sample_pos < slice_min) || any(sample_pos > slice_max) ;
+        let slice_test = any(sample_pos < vec3<f32>(0.)) || any(sample_pos > vec3<f32>(1.)) ;
         if slice_test || iters > 10000 {
             break;
         }

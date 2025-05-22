@@ -51,7 +51,7 @@ pub static COLORMAPS: Lazy<HashMap<String, HashMap<String, ColorMap>>> = Lazy::n
 });
 
 #[derive(Debug, Clone)]
-struct ListedColorMap(Vec<Vector4<u8>>);
+pub struct ListedColorMap(Vec<Vector4<u8>>);
 
 impl Hash for ListedColorMap {
     fn hash<H: Hasher>(&self, state: &mut H) {

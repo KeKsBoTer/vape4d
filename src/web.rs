@@ -8,9 +8,10 @@ use web_sys::js_sys::{ArrayBuffer, Uint8Array};
 use web_sys::{Request, RequestInit, RequestMode, Response};
 use web_time::Duration;
 
-use crate::cmap::{self, ColorMap};
+use crate::cmap::{self, ColorMap, ListedColorMap, COLORMAP_RESOLUTION};
+use crate::renderer::RenderSettings;
 use crate::volume::Volume;
-use crate::{open_window, RenderConfig};
+use crate::{open_window, UISettings, ViewerSettings};
 
 #[wasm_bindgen]
 #[derive(Debug, Clone, Copy)]
@@ -104,27 +105,63 @@ pub async fn viewer_wasm(
     colormap: Option<Vec<u8>>,
     settings: Option<InlineViewerConfig>,
 ) -> Result<(), JsValue> {
-    let render_config = match settings {
-        Some(settings) => RenderConfig {
-            no_vsync: false,
-            background_color: settings.background_color.into(),
-            show_colormap_editor: settings.show_colormap_editor,
-            vmin: settings.vmin,
-            vmax: settings.vmax,
-            distance_scale: settings.distance_scale,
 
-            show_cmap_select: settings.show_cmap_select,
-            duration: settings.duration.map(Duration::from_secs_f32),
-            axis_scale: Vector3::new(
-                settings.axis_scale_x.unwrap_or(1.0),
-                settings.axis_scale_y.unwrap_or(1.0),
-                settings.axis_scale_z.unwrap_or(1.0),
-            ),
-        },
-        None => RenderConfig::default(),
+    // load colormap from url if present
+    let colormap = match colormap {
+        Some(data) => Some(data),
+        None => load_colormap().await?,
+    };
+    let colormap = match colormap {
+        Some(data) => ColorMap::read(Cursor::new(data))
+            .map_err(|e| JsError::new(&format!("Failed to load colormap: {}", e)))?,
+        None => cmap::COLORMAPS["seaborn"]["icefire"]
+            .clone()
     };
 
-    start_viewer(canvas_id, render_config, volume_data, colormap).await
+    let render_config = match settings {
+
+        Some(settings) => ViewerSettings {
+            no_vsync: false,
+            render_settings: RenderSettings{ 
+                time: 0.,
+                step_size: None,
+                spatial_filter: wgpu::FilterMode::Linear, 
+                temporal_filter: wgpu::FilterMode::Linear, 
+                distance_scale: settings.distance_scale, 
+                vmin: settings.vmin, 
+                vmax: settings.vmax, 
+                gamma_correction: false,
+                background_color: settings.background_color.into(),
+                axis_scale: Vector3::new(
+                    settings.axis_scale_x.unwrap_or(1.0),
+                    settings.axis_scale_y.unwrap_or(1.0),
+                    settings.axis_scale_z.unwrap_or(1.0),
+                ),
+                cmap: todo!(),
+                axis_scale: Vector3::new(
+                    settings.axis_scale_x.unwrap_or(1.0),
+                    settings.axis_scale_y.unwrap_or(1.0),
+                    settings.axis_scale_z.unwrap_or(1.0),
+                ),
+            },
+            ui_settings: UISettings {
+                show_colormap_editor: settings.show_colormap_editor,
+                show_cmap_select: settings.show_cmap_select,
+            },
+            duration: settings.duration.map(Duration::from_secs_f32),  
+        },
+        None => ViewerSettings {
+            no_vsync: false,
+            ui_settings: UISettings::default(),
+            render_settings: RenderSettings{
+                background_color: wgpu::Color::BLACK,
+                ..Default::default()
+            },
+            duration: None,
+        },
+    };
+
+    start_viewer(canvas_id, render_config, volume_data).await
 }
 
 /// Download a file from a given url
@@ -202,9 +239,8 @@ async fn load_data() -> Result<Vec<u8>, JsValue> {
 /// If volume data and colormap are not provided, the viewer will prompt the user to select a file (or load from a url provided in the page url).
 async fn start_viewer(
     canvas_id: String,
-    render_config: RenderConfig,
+    render_config: ViewerSettings,
     volume_data: Option<Vec<u8>>,
-    colormap: Option<Vec<u8>>,
 ) -> Result<(), JsValue> {
     let window = web_sys::window().ok_or(JsError::new("cannot access window"))?;
     let document = window
@@ -226,24 +262,12 @@ async fn start_viewer(
         Some(data) => data,
         None => load_data().await?,
     };
-    // load colormap from url if present
-    let colormap = match colormap {
-        Some(data) => Some(data),
-        None => load_colormap().await?,
-    };
-    let colormap = match colormap {
-        Some(data) => ColorMap::read(Cursor::new(data))
-            .map_err(|e| JsError::new(&format!("Failed to load colormap: {}", e)))?,
-        None => cmap::COLORMAPS["seaborn"]["icefire"]
-            .clone()
-    };
-
     wasm_bindgen_futures::spawn_local(async move {
         let reader_v = Cursor::new(volume_data);
         let volumes: Volume = Volume::load_numpy(reader_v, true).unwrap();
         overlay.set_attribute("style", "display:none;").ok();
 
-        open_window(volumes, colormap, render_config, canvas_id).await
+        open_window(volumes, render_config, canvas_id).await
     });
     Ok(())
 }
