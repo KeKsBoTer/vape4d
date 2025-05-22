@@ -17,6 +17,7 @@ def render(
     distance_scale: float = 1.0,
     spatial_interpolation: str = "linear",
     temporal_interpolation: str = "linear",
+    camera_angle: Optional[Tuple[float, float]] = None,
 ) -> np.ndarray:
     """renders a single or multiple images of a volume
 
@@ -32,6 +33,7 @@ def render(
         distance_scale (float, optional): distance scale for rendering. A larger value makes everything more opaque. Defaults to 1.0.
         spatial_interpolation (str, optional): interpolation in space. Linear or Nearest. Defaults to "linear".
         temporal_interpolation (str, optional): interpolation in time. Linear or Nearest. Defaults to "linear".
+        camera_angle (Optional[Tuple[float, float]], optional): camera angle for rendering in spherical coordinates (polar,azimuthal angle ). Defaults to None.
 
     Returns:
         np.ndarray: [T, H, W, 4] if time is a list, [H, W, 4] if time is a single value
@@ -74,6 +76,7 @@ def render(
         vmax,
         spatial_interpolation,
         temporal_interpolation,
+        camera_angle,
     )
     if len(time) == 1:
         return frames[0]

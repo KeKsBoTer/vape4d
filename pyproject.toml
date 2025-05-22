@@ -1,6 +1,6 @@
 [project]
 name = "vape4d"
-version = "0.2.5"
+version = "0.2.6"
 description = "Volume 4D Visualization"
 readme = "README.md"
 requires-python = ">=3.8"

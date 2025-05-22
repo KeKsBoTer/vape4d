@@ -4248,7 +4248,7 @@ dependencies = [
 
 [[package]]
 name = "vape4d"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "bytemuck",

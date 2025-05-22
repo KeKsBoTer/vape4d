@@ -20,12 +20,18 @@ impl<P: Projection> Camera<P> {
         }
     }
 
-    pub fn new_aabb_iso(aabb: Aabb<f32>, projection: P) -> Self {
+    pub fn new_aabb_iso(
+        aabb: Aabb<f32>,
+        projection: P,
+        angle: Option<(f32, f32)>,
+    ) -> Self {
+        let a = to_spherical(Vector3::new(-1., -1., -1.).normalize());
+        let angle = angle.unwrap_or((a.y, a.z));
         let r = aabb.radius();
-        let corner = vec3(1., -1., 1.);
-        let view_dir = Quaternion::look_at(-corner, Vector3::unit_y());
+        let corner =  from_spherical(angle.0, angle.1);
+        let view_dir = Quaternion::look_at(-corner, up_vector(corner));
         Camera::new(
-            aabb.center() + corner.normalize() * r * 2.8,
+            aabb.center() + corner * r * 2.8,
             view_dir,
             projection,
         )
@@ -177,4 +183,42 @@ impl Projection for OrthographicProjection {
         p[3][3] = 1.0;
         return p.transpose();
     }
+}
+
+fn up_vector(view_dir: Vector3<f32>) -> Vector3<f32> {
+    let y_unit = Vector3::unit_y();
+    if view_dir.dot(y_unit).abs() > 0.99 {
+        Vector3::unit_z()
+    } else {
+        y_unit
+    }
+}
+
+pub fn to_spherical(p:Vector3<f32>) -> Vector3<f32> {
+    // Calculate rho
+    let rho = p.magnitude();
+
+    let mut theta = p.y.atan2(p.x);
+    if theta < 0.0 {
+        theta += 2.0 * std::f32::consts::PI;
+    }
+
+    // Calculate phi
+    // Handle the edge case where rho is zero to avoid division by zero.
+    // If rho is zero, the point is at the origin, and phi is conventionally 0.
+    let phi = if rho == 0.0 {
+        0.0
+    } else {
+        (p.z / rho).acos() // acos returns a value in the range [0, PI]
+    };
+
+    Vector3::new(rho, theta, phi)
+}
+
+
+pub fn from_spherical(theta: f32, phi: f32) -> Vector3<f32> {
+    let x = theta.sin() * phi.sin();
+    let y = theta.cos() * phi.sin();
+    let z = phi.cos();
+    Vector3::new(x, y, z)
 }

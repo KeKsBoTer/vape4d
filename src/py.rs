@@ -28,6 +28,7 @@ fn vape4d<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
         vmax: Option<f32>,
         spatial_interpolation: Option<String>,
         temporal_interpolation: Option<String>,
+        camera_angle: Option<(f32, f32)>,
     ) -> PyResult<Bound<'py, PyArray4<u8>>> {
         let volume = Volume::from_array(volume.as_array());
         let cmap = ListedColorMap::from_array(cmap.as_array());
@@ -60,6 +61,7 @@ fn vape4d<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
             distance_scale,
             spatial_interpolation,
             temporal_interpolation,
+            camera_angle,
         ))
         .map_err(|e| PyTypeError::new_err(format!("{:?}", e)))?;
 

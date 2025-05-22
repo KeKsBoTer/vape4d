@@ -209,6 +209,7 @@ impl WindowContext {
         let camera = Camera::new_aabb_iso(
             volumes[0].aabb.clone(),
             OrthographicProjection::new(Vector2::new(ratio, 1.) * 2. * radius, 1e-4, 100.),
+            None,
         );
 
         let animation_duration = render_config

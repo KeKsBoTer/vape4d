@@ -1,3 +1,5 @@
+use core::f32;
+
 use cgmath::Vector2;
 use image::{ImageBuffer, Rgba};
 
@@ -73,6 +75,7 @@ pub async fn render_volume(
     distance_scale: f32,
     spatial_interpolation: wgpu::FilterMode,
     temporal_interpolation: wgpu::FilterMode,
+    camera_angle: Option<(f32, f32)>,
 ) -> anyhow::Result<Vec<ImageBuffer<Rgba<u8>, Vec<u8>>>> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let wgpu_context = WGPUContext::new(&instance, None).await?;
@@ -95,6 +98,7 @@ pub async fn render_volume(
     let camera = Camera::new_aabb_iso(
         aabb,
         OrthographicProjection::new(Vector2::new(ratio, 1.) * radius * 2., 0.01, 1000.),
+        camera_angle
     );
 
     let mut images: Vec<ImageBuffer<Rgba<u8>, Vec<u8>>> = Vec::with_capacity(frames.len());
