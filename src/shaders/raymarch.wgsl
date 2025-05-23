@@ -189,7 +189,7 @@ fn trace_ray(ray_in: Ray) -> vec4<f32> {
         // check if within slice
         let slice_test = any(sample_pos.xyz < settings.clipping.min) || any(sample_pos.xyz > settings.clipping.max) ;
 
-        if slice_test || iters > 10000 {
+        if slice_test{
             break;
         }
         iters += 1u;
