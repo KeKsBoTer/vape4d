@@ -20,6 +20,10 @@ with pip
 ```
 pip install vape4d
 ```
+or, alternatively, using conda
+```
+conda install conda-forge::vape4d
+```
 
 
 ## Usage
